@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "triangles"
+version = "0.1.0"
+description = ""
+authors = ["Craig Sherstan <craig.sherstan@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.11"
+jaxlib = {version = "^0.4.23+cuda12.cudnn89", source = "jax"}
+jax = "^0.4.23"
+pillow = "^10.1.0"
+swig = "^4.1.1.post1"
+gymnasium = {extras = ["classic-control"], version = "^0.28.1"}
+ray = {extras = ["rllib"], version = "^2.9.0"}
+dm-reverb = "^0.14.0"
+flax = "^0.7.5"
+structlog = "^23.2.0"
+distrax = "^0.1.5"
+ml-dtypes = "0.2.0"
+tensorflow = "^2.15.0"
+
+
+[[tool.poetry.source]]
+name = "jax"
+url = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
+priority = "supplemental"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
