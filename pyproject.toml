@@ -19,6 +19,7 @@ structlog = "^23.2.0"
 distrax = "^0.1.5"
 ml-dtypes = "0.2.0"
 tensorflow = "^2.15.0"
+matplotlib = "^3.8.2"
 
 
 [[tool.poetry.source]]
