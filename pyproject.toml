@@ -7,8 +7,8 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.11"
-jaxlib = {version = "^0.4.23+cuda12.cudnn89", source = "jax"}
-jax = "^0.4.23"
+#jaxlib = {version = "0.4.22+cuda12.cudnn89", source = "jax"}
+#jax = "0.4.22"
 pillow = "^10.1.0"
 swig = "^4.1.1.post1"
 gymnasium = {extras = ["classic-control"], version = "^0.28.1"}
@@ -20,6 +20,8 @@ distrax = "^0.1.5"
 ml-dtypes = "0.2.0"
 tensorflow = "^2.15.0"
 matplotlib = "^3.8.2"
+jaxlib = {version = "0.4.19+cuda12.cudnn89", source = "jax"}
+jax = "0.4.19"
 
 
 [[tool.poetry.source]]

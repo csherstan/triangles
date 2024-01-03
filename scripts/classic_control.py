@@ -1,10 +1,18 @@
 """
 This is a training script to first train gym agents in the classic control setting to
 validate my SAC implementation.
+
+At the time of writing jaxlib 0.4.23 has a bug from the xla prject that prevents it from obeying XLA_PYTHON_CLIENT_PREALLOCATE
+Because of this I have downgraded to 0.4.19
 """
-import ctypes
-import multiprocessing
 import os
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+
+import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
+
+import multiprocessing
+
 from datetime import datetime
 from queue import Empty
 
@@ -17,32 +25,26 @@ from flax.metrics.tensorboard import SummaryWriter
 from jax._src.basearray import ArrayLike
 from reverb import ReplaySample
 
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-# os.environ["JAX_PLATFORMS"] = "cpu"
-
 import dataclasses
 import time
-from typing import Dict, Any, Optional, Tuple, List, Callable, Protocol, Mapping
+from typing import Dict, Any, Optional, Tuple, List, Callable, Protocol
 
 import gymnasium as gym
 import jax
-import tensorflow as tf
+import jax.numpy as jnp
 
-tf.config.set_visible_devices([], 'GPU')
 import reverb
 import flax.linen as nn
 
-from multiprocessing import Pool, Event, Value, Process, Queue
+from multiprocessing import Event, Process, Queue
 from multiprocessing.synchronize import Event as EventClass
-from multiprocessing import Value as ValueClass
 
 import structlog
 from flax import struct
 from flax.training import train_state
-from flax.metrics import tensorboard
 from gymnasium import spaces
 from jax import Array, jit
-import jax.numpy as jnp
+
 import distrax
 
 LOG = structlog.getLogger()
@@ -64,6 +66,7 @@ class ExpConfig:
   gamma: float = 0.99
   tau: float = 0.995  # soft-target update param, target = target*tau + active*(1-tau)
   alpha: float = 0.5  # weight on the entropy term
+  alpha_lr: float = 3e-4  # original code base default
   num_eval_iterations: int = 1
   eval_frequency: int = 100
   steps_per_model_clock: int = 300
@@ -116,7 +119,13 @@ class SACModelState(struct.PyTreeNode):
   policy_state: TrainState
   q1_state: QTrainState
   q2_state: QTrainState
-  model_clock: int = 0
+
+  # I think the cleanest way to wrap up alpha would be to put it in a TrainState as well, but I'm
+  # making the choice not to so that I have practice manual applying the transformations and tracking state
+  alpha_params: VariableDict
+  alpha_optimizer_params: optax.GradientTransformation
+
+  model_clock: jax.Array
 
 
 @dataclasses.dataclass()
@@ -169,6 +178,7 @@ def collect(env: gym.Env, policy: nn.Module, params: VariableDict, rng_key: Arra
 def rw(idx: int, shutdown: EventClass, queue, config: RWConfig):
   # try:
   with jax.default_device(jax.devices('cpu')[0]):
+    assert jnp.array([0]).devices().pop().platform == "cpu"
     rw_(idx, shutdown, queue, config)
   # except Exception as e:
   #   raise e
@@ -301,15 +311,6 @@ class Policy(nn.Module):
     return actions, jnp.expand_dims(action_log_prob, -1), jnp.tanh(means)
 
 
-# class FlaxPolicy(PolicyProtocol):
-#
-#   def __init__(self):
-#
-#
-#   def __call__(self, obs: np.ndarray, params: Any) -> np.ndarray:
-#     j_obs = jnp.array(obs)
-
-
 class QFunction(nn.Module):
 
   @nn.compact
@@ -325,9 +326,7 @@ class QFunction(nn.Module):
     ])(inputs)
 
 
-# TODO: If I jit this function the returned data is not correct. The model clock is not being updated.
-# I believe all the returned data needs to be JAX data (some sort of pytree)
-# @jit
+@jit
 def train_step(batch: Dict[str, Array], model_state: SACModelState, config: ExpConfig, rng_key: Array) -> Tuple[
   SACModelState, Dict[str, float]]:
   """
@@ -350,11 +349,12 @@ def train_step(batch: Dict[str, Array], model_state: SACModelState, config: ExpC
   rewards: Array = atleast_2d(batch["reward"])
   dones: Array = atleast_2d(batch["terminated"])
   next_observations: Array = atleast_2d(batch["next_obs"])
-  losses = {}
+  metrics = {}
 
   policy_state = model_state.policy_state
   q1_state = model_state.q1_state
   q2_state = model_state.q2_state
+  alpha = model_state.alpha_params["alpha"][0]
 
   # ---- Q-function updates
   next_sampled_actions, next_sampled_actions_logits, *_ = policy_state.apply_fn(
@@ -367,7 +367,7 @@ def train_step(batch: Dict[str, Array], model_state: SACModelState, config: ExpC
 
   q_target = rewards + config.gamma * (1 - dones) * (jnp.minimum(target_values_1,
                                                                  target_values_2) -
-                                                     config.alpha * next_sampled_actions_logits)
+                                                     alpha * next_sampled_actions_logits)
 
   # Note to self: by default, value_and_grad will take the derivate of the loss (first returned val) wrt the first
   # param, so the params that we want grads for need to be the first argument.
@@ -380,7 +380,7 @@ def train_step(batch: Dict[str, Array], model_state: SACModelState, config: ExpC
   q1_state = q1_state.apply_gradients(grads=grads)
   q2_loss, grads = q_grad_fn(q2_state.params, q2_state, q_target, observations, actions)
   q2_state = q2_state.apply_gradients(grads=grads)
-  losses["q"] = (q1_loss + q2_loss) / 2.
+  metrics["loss.q"] = (q1_loss + q2_loss) / 2.
 
   def update_target_network(q_state: QTrainState) -> QTrainState:
     target_params = jax.tree_map(lambda source, target: (1 - config.tau) * source + config.tau * target, q_state.params,
@@ -400,22 +400,45 @@ def train_step(batch: Dict[str, Array], model_state: SACModelState, config: ExpC
     q_2 = q2_state.apply_fn({"params": q2_state.params}, observations, actions)
 
     min_q = jnp.minimum(q_1, q_2)
-    loss = jnp.mean(config.alpha * logits - min_q)
+    loss = jnp.mean(alpha * logits - min_q)
 
     return loss
 
   policy_grad_fn = jax.value_and_grad(policy_loss_fn, has_aux=False)
   policy_loss, grads = policy_grad_fn(policy_state.params, observations, next(rng_gen))
   policy_state = policy_state.apply_gradients(grads=grads)
+  metrics["loss.policy"] = policy_loss
 
-  losses["policy"] = policy_loss
+  # ------- Alpha update
 
+  actions, log_p_actions, *_ = policy_state.apply_fn({"params": policy_state.params}, observations, next(rng_gen))
+
+  # heuristic used in the original paper and codebase
+  target_entropy = -jnp.prod(jnp.array(actions.shape[1:]))
+
+  alpha_loss, grads = jax.value_and_grad(
+    lambda alpha_params: -(alpha_params["alpha"] * (log_p_actions + target_entropy)).mean(), has_aux=False)(
+    model_state.alpha_params)
+  updates, alpha_optimizer_params = optax.adam(learning_rate=config.alpha_lr).update(grads,
+                                                                                     model_state.alpha_optimizer_params,
+                                                                                     model_state.alpha_params)
+  alpha_params = optax.apply_updates(model_state.alpha_params, updates)
+  metrics["loss.alpha"] = alpha_loss
+
+  metrics["alpha"] = alpha_params["alpha"][0]
+
+  # Note, I ran into a bug here where the model_clock was only getting updated once when the function was jitted.
+  # That's a clear sign that there was some side effect happening. The issue turned out to be that instead of
+  # referencing `model_state.model_clock` I was accessing `sac_state.model_clock`, which is a global var, therefore
+  # it was a global var that wasn't being traced and the value of the model clock was being cached on the first pass.
   return SACModelState(
-    model_clock=sac_state.model_clock + 1,
+    model_clock=model_state.model_clock + 1,
     policy_state=policy_state,
     q1_state=q1_state,
     q2_state=q2_state,
-  ), losses
+    alpha_params=alpha_params,
+    alpha_optimizer_params=alpha_optimizer_params,
+  ), metrics
 
 
 class QueueMetricWriter(MetricWriter):
@@ -436,7 +459,8 @@ class Models:
   q_2_target: nn.Module
 
 
-def create_policy(env: gym.Env, config: ExpConfig) -> Tuple[nn.Module, TrainState]:
+def create_policy(env: gym.Env, config: ExpConfig, rng_key: Array) -> Tuple[nn.Module, TrainState]:
+  rng_gen = rng_seq(rng_key=rng_key)
   policy = Policy(action_size=env.action_space.shape[0], scale=2)
   init_samples = [env.observation_space.sample(), env.observation_space.sample()]
   output, policy_variables = policy.init_with_output(next(rng_gen), jnp.array(init_samples), next(rng_gen))
@@ -449,7 +473,8 @@ def create_policy(env: gym.Env, config: ExpConfig) -> Tuple[nn.Module, TrainStat
   return policy, policy_state
 
 
-def create_q_function(env: gym.Env, config: ExpConfig) -> Tuple[nn.Module, QTrainState]:
+def create_q_function(env: gym.Env, config: ExpConfig, rng_key: Array) -> Tuple[nn.Module, QTrainState]:
+  rng_gen = rng_seq(rng_key=rng_key)
   q = QFunction()
   init_samples = jnp.array([env.observation_space.sample(), env.observation_space.sample()])
   init_actions = jnp.array([env.action_space.sample(), env.action_space.sample()])
@@ -492,9 +517,19 @@ def convert_batch(batch: ReplaySample) -> Dict[str, jnp.ndarray]:
   return {k: atleast_2d(jnp.asarray(v)) for k, v in batch.data.items()}
 
 
-if __name__ == "__main__":
+def main():
+  """
+  Note: moving everything into a main function, instead of leaving it tucked under if __name__=="__main__", can
+  address two problems:
+    - It can be written in such a way as to be a reusable entry point, callable from different scripts (not done here).
+    - It prevents variables from being exposed as global. Global vars caused at least one problem for me here when
+    using autocomplete in my IDE.
+  """
+
   multiprocessing.set_start_method("spawn")
   config = ExpConfig()
+
+  assert jnp.array([0]).devices().pop().platform == "gpu"
 
   seed = config.seed if config.seed is not None else time.time_ns()
   rng_gen = rng_seq(seed=seed)
@@ -507,11 +542,19 @@ if __name__ == "__main__":
   assert type(env.action_space) == spaces.Box
   assert type(env.observation_space) == spaces.Box
 
-  policy, policy_state = create_policy(env, config)
-  q1, q1_state, = create_q_function(env, config)
-  q2, q2_state, = create_q_function(env, config)
+  policy, policy_state = create_policy(env, config, next(rng_gen))
+  q1, q1_state, = create_q_function(env, config, next(rng_gen))
+  q2, q2_state, = create_q_function(env, config, next(rng_gen))
 
-  sac_state = SACModelState(policy_state=policy_state, q1_state=q1_state, q2_state=q2_state)
+  # although alpha is a scalar, it needs to have a dimension for jax.grad to be happy
+  alpha_params = {"alpha": jnp.array([config.alpha])}
+
+  sac_state = SACModelState(policy_state=policy_state,
+                            q1_state=q1_state,
+                            q2_state=q2_state,
+                            alpha_params=alpha_params,
+                            alpha_optimizer_params=optax.adam(learning_rate=config.alpha_lr).init(alpha_params),
+                            model_clock=jnp.array(0, dtype=jnp.int32), )
 
   # ---------- Reverb setup
   reverb_table_name = 'table'
@@ -560,14 +603,12 @@ if __name__ == "__main__":
   for p in processes:
     p.start()
 
-
   def send_model(model_clock: int) -> None:
     LOG.info(f"Sending model: {model_clock}")
     msg = flax.serialization.msgpack_serialize(
       {"policy_params": sac_state.policy_state.params, "model_clock": model_clock})
     for q in model_queues:
       q.put(msg)
-
 
   send_model(model_clock=0)
 
@@ -579,15 +620,17 @@ if __name__ == "__main__":
       continue
 
     batch = convert_batch(list(dataset.take(1))[0])
+
     new_sac_state, metrics = train_step(batch, sac_state, config=config, rng_key=next(rng_gen))
 
     sac_state = new_sac_state
+    model_clock = int(sac_state.model_clock)
 
-    send_model(sac_state.model_clock)
+    send_model(model_clock)
 
     # ---- write metrics
     for k, v in metrics.items():
-      summary_writer.scalar(k, float(v), sac_state.model_clock)
+      summary_writer.scalar(k, float(v), model_clock)
 
     try:
       while True:
@@ -606,3 +649,12 @@ if __name__ == "__main__":
   replay_server.stop()
 
   print("exit")
+
+
+# TODO: model save and load
+# TODO: I noticed something with the eval runs producing exactly the same returns, investigate.
+# TODO: adaptive alpha
+# TODO: seeing GPU out of memory errors
+
+if __name__ == "__main__":
+  main()
