@@ -2,13 +2,24 @@
 This is a training script to first train gym agents in the classic control setting to
 validate my SAC implementation.
 
-At the time of writing jaxlib 0.4.23 has a bug from the xla prject that prevents it from obeying XLA_PYTHON_CLIENT_PREALLOCATE
+Import issues:
+1. At the time of writing jaxlib 0.4.23 has a bug from the xla prject that prevents it from obeying XLA_PYTHON_CLIENT_PREALLOCATE
 Because of this I have downgraded to 0.4.19
+
+2. The orbax checkpointer has some bugs where the API is not matching. To correct this it would be nice to upgrade
+orbax to the latest, but the latest requires ml-types greater than 0.3. However, the current release of tf requires
+ml-types==0.2. The nightly build of tf allows 0.3, but going down that route broke all sorts of things. So instead
+I've dropped orbax and am using flax's own checkpoint system
+
 """
+import argparse
 import os
+from pathlib import Path
+
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import tensorflow as tf
+
 tf.config.set_visible_devices([], 'GPU')
 
 import multiprocessing
@@ -24,6 +35,8 @@ from flax.core.scope import VariableDict
 from flax.metrics.tensorboard import SummaryWriter
 from jax._src.basearray import ArrayLike
 from reverb import ReplaySample
+
+from flax.training import checkpoints
 
 import dataclasses
 import time
@@ -67,7 +80,7 @@ class ExpConfig:
   tau: float = 0.995  # soft-target update param, target = target*tau + active*(1-tau)
   alpha: float = 0.5  # weight on the entropy term
   alpha_lr: float = 3e-4  # original code base default
-  num_eval_iterations: int = 1
+  num_eval_iterations: int = 3
   eval_frequency: int = 100
   steps_per_model_clock: int = 300
 
@@ -121,7 +134,7 @@ class SACModelState(struct.PyTreeNode):
   q2_state: QTrainState
 
   # I think the cleanest way to wrap up alpha would be to put it in a TrainState as well, but I'm
-  # making the choice not to so that I have practice manual applying the transformations and tracking state
+  # making the choice not to so that I have practice manually applying the transformations and tracking state
   alpha_params: VariableDict
   alpha_optimizer_params: optax.GradientTransformation
 
@@ -138,7 +151,7 @@ class Transition:
   info: Dict[str, Any]
 
 
-def collect(env: gym.Env, policy: nn.Module, params: VariableDict, rng_key: Array, exploit=False) -> Tuple[
+def collect(env: gym.Env, policy: nn.Module, policy_params: VariableDict, rng_key: Array, exploit=False) -> Tuple[
   float, List[Transition]]:
   rng_gen = rng_seq(rng_key=rng_key)
   the_return = 0.
@@ -146,7 +159,7 @@ def collect(env: gym.Env, policy: nn.Module, params: VariableDict, rng_key: Arra
   transitions = []
   while True:
     # TODO: For the policy I briefly got distracted starting to abstract this, DON'T DO IT!!! (yet).
-    action, log_p, exploit_action = policy.apply({"params": params}, jnp.asarray(obs), next(rng_gen))
+    action, log_p, exploit_action = policy.apply({"params": policy_params}, jnp.asarray(obs), next(rng_gen))
     action = exploit_action if exploit else action
     action = jnp.clip(action[0], a_min=-1, a_max=1)
     # TODO: move scaling to the appropriate place
@@ -269,12 +282,13 @@ def eval_process(shutdown: EventClass, model_queue: multiprocessing.Queue, metri
 
 def eval_step(policy_params: VariableDict, model_clock: int, config: ExpConfig, rng_key: Array,
               metric_writer: MetricWriter):
+  rng_gen = rng_seq(rng_key=rng_key)
   env = env_factory()
   policy = policy_factory(env)
 
   returns = []
   for i in range(config.num_eval_iterations):
-    the_return, _ = collect(env, policy, policy_params, rng_key=rng_key, exploit=True)
+    the_return, _ = collect(env, policy, policy_params, rng_key=next(rng_gen), exploit=True)
     returns.append(the_return)
 
   metric_writer.scalar("eval_return", np.mean(returns), model_clock)
@@ -496,8 +510,8 @@ class RWModel:
   model_factory: Callable[[], nn.Module]
 
 
-def env_factory() -> gym.Env:
-  return gym.make("Pendulum-v1")
+def env_factory(show: bool = False) -> gym.Env:
+  return gym.make("Pendulum-v1", render_mode='human' if show else 'rgb_array')
 
 
 def policy_factory(env: gym.Env) -> Policy:
@@ -517,6 +531,23 @@ def convert_batch(batch: ReplaySample) -> Dict[str, jnp.ndarray]:
   return {k: atleast_2d(jnp.asarray(v)) for k, v in batch.data.items()}
 
 
+def create_init_state(config: ExpConfig, env: gym.Env, rng_key: Array):
+  rng_gen = rng_seq(rng_key=rng_key)
+  policy, policy_state = create_policy(env, config, next(rng_gen))
+  q1, q1_state, = create_q_function(env, config, next(rng_gen))
+  q2, q2_state, = create_q_function(env, config, next(rng_gen))
+
+  # although alpha is a scalar, it needs to have a dimension for jax.grad to be happy
+  alpha_params = {"alpha": jnp.array([config.alpha])}
+
+  return SACModelState(policy_state=policy_state,
+                       q1_state=q1_state,
+                       q2_state=q2_state,
+                       alpha_params=alpha_params,
+                       alpha_optimizer_params=optax.adam(learning_rate=config.alpha_lr).init(alpha_params)[0],
+                       model_clock=jnp.array(0, dtype=jnp.int32), )
+
+
 def main():
   """
   Note: moving everything into a main function, instead of leaving it tucked under if __name__=="__main__", can
@@ -534,27 +565,17 @@ def main():
   seed = config.seed if config.seed is not None else time.time_ns()
   rng_gen = rng_seq(seed=seed)
 
-  summary_writer = SummaryWriter(
-    f"data/classic_control/pendulum/{datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')}")
+  output_dir = Path(f"data/classic_control/pendulum/{datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')}")
+  summary_writer = SummaryWriter(output_dir / "tensorboard")
 
   env = env_factory()
 
   assert type(env.action_space) == spaces.Box
   assert type(env.observation_space) == spaces.Box
 
-  policy, policy_state = create_policy(env, config, next(rng_gen))
-  q1, q1_state, = create_q_function(env, config, next(rng_gen))
-  q2, q2_state, = create_q_function(env, config, next(rng_gen))
-
-  # although alpha is a scalar, it needs to have a dimension for jax.grad to be happy
-  alpha_params = {"alpha": jnp.array([config.alpha])}
-
-  sac_state = SACModelState(policy_state=policy_state,
-                            q1_state=q1_state,
-                            q2_state=q2_state,
-                            alpha_params=alpha_params,
-                            alpha_optimizer_params=optax.adam(learning_rate=config.alpha_lr).init(alpha_params),
-                            model_clock=jnp.array(0, dtype=jnp.int32), )
+  sac_state = create_init_state(config=config,
+                                env=env,
+                                rng_key=next(rng_gen))
 
   # ---------- Reverb setup
   reverb_table_name = 'table'
@@ -588,7 +609,6 @@ def main():
 
   # ------ Set up processes for data collection.
   terminate_event: EventClass = Event()
-  lock = multiprocessing.Lock()
 
   model_queues = [multiprocessing.Queue() for i in range(config.num_rw_workers)]
   processes = [Process(target=rw, args=(i, terminate_event, model_queues[i], rw_config)) for i in
@@ -612,12 +632,26 @@ def main():
 
   send_model(model_clock=0)
 
-  # training loop
+  # ----------- checkpointer
+
+  checkpoint_dir = Path(output_dir / "checkpoint").absolute()
+  checkpoint_dir.mkdir(parents=True)
+
+  def save_checkpoint(state: SACModelState, model_clock: int) -> None:
+    if model_clock % config.eval_frequency == 0:
+       checkpoints.save_checkpoint(checkpoint_dir, target={"state": state}, step=model_clock,
+                                  keep_every_n_steps=config.steps_per_model_clock)
+
+  # -------- Training loop
+  while replay_client.server_info()[reverb_table_name].current_size < config.min_replay_size:
+    time.sleep(1)
+
+  LOG.info("minimum replay buffer requirement met")
+
+  save_checkpoint(sac_state, 0)
+
+  LOG.info("begin training")
   while True:
-    # LOG.info(f"Replay buffer size: {replay_client.server_info()[reverb_table_name].current_size}")
-    if replay_client.server_info()[reverb_table_name].current_size < config.min_replay_size:
-      time.sleep(1)
-      continue
 
     batch = convert_batch(list(dataset.take(1))[0])
 
@@ -627,6 +661,7 @@ def main():
     model_clock = int(sac_state.model_clock)
 
     send_model(model_clock)
+    save_checkpoint(sac_state, model_clock)
 
     # ---- write metrics
     for k, v in metrics.items():
@@ -651,10 +686,30 @@ def main():
   print("exit")
 
 
-# TODO: model save and load
-# TODO: I noticed something with the eval runs producing exactly the same returns, investigate.
-# TODO: adaptive alpha
-# TODO: seeing GPU out of memory errors
+def watch(checkpoint: Path):
+  config = ExpConfig()
+  with jax.default_device(jax.devices('cpu')[0]):
+    rng_gen = rng_seq(seed=time.time_ns())
+    env = env_factory(show=True)
+    policy = policy_factory(env)
+    sac_state = create_init_state(config=config,
+                                  env=env,
+                                  rng_key=next(rng_gen))
+    checkpoints.restore_checkpoint(checkpoint, {"state": sac_state})
+
+    while True:
+      collect(env, policy, sac_state.policy_state.params, next(rng_gen), exploit=True)
 
 if __name__ == "__main__":
-  main()
+  parser = argparse.ArgumentParser()
+  parser.add_argument("mode", choices=["train", "watch"], default="train")
+  parser.add_argument("--checkpoint", type=Path, help="path to checkpoint folder")
+  args = parser.parse_args()
+
+  match args.mode:
+    case "train":
+      main()
+
+    case "watch":
+      assert args.checkpoint
+      watch(args.checkpoint)
