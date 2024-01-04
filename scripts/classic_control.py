@@ -695,10 +695,12 @@ def watch(checkpoint: Path):
     sac_state = create_init_state(config=config,
                                   env=env,
                                   rng_key=next(rng_gen))
-    checkpoints.restore_checkpoint(checkpoint, {"state": sac_state})
+
+    sac_state = checkpoints.restore_checkpoint(checkpoint, {"state": sac_state})["state"]
 
     while True:
-      collect(env, policy, sac_state.policy_state.params, next(rng_gen), exploit=True)
+      the_return, _ = collect(env, policy, sac_state.policy_state.params, next(rng_gen), exploit=True)
+      print(the_return)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
