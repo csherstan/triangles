@@ -21,6 +21,7 @@ orbax = "^0.1.9"
 dm-reverb = "^0.14.0"
 tensorflow = "2.15.0"
 tensorflow-probability = "^0.23.0"
+tqdm = "^4.66.1"
 
 
 
