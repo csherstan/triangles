@@ -92,10 +92,12 @@ def atleast_2d(data: Array) -> Array:
   return data
 
 
+# def convert_batch(batch: ReplaySample) -> Dict[str, jnp.ndarray]:
+#
+#   return Batch(**jax.tree_map(lambda leaf: atleast_2d(jnp.asarray(leaf)), batch.data))
+
 def convert_batch(batch: ReplaySample) -> Dict[str, jnp.ndarray]:
-
-  return Batch(**jax.tree_map(lambda leaf: atleast_2d(jnp.asarray(leaf)), batch.data))
-
+  return Batch(**{k: atleast_2d(jnp.asarray(v)) for k, v in batch.data.items()})
 
 class FilterQueue():
 
@@ -379,12 +381,20 @@ def rw_(rw_id: int, shutdown: EventClass, env_factory: EnvFactoryType, policy_fa
           try:
             writer.create_item(table=config.reverb_table_name,
                                trajectory={
-                                 "obs": slice_leaves(writer.history["obs"], first_slice),
-                                 "action": slice_leaves(writer.history["action"], first_slice),
-                                 "reward": slice_leaves(writer.history["reward"], first_slice),
-                                 "terminated": slice_leaves(writer.history["terminated"], first_slice),
-                                 "next_obs": slice_leaves(writer.history["obs"], slice(-1)),
+                                 "obs": writer.history["obs"][idx - 1],
+                                 "action": writer.history["action"][idx - 1],
+                                 "reward": writer.history["reward"][idx - 1],
+                                 "terminated": writer.history["terminated"][idx - 1],
+                                 "next_obs": writer.history["obs"][idx],
                                }, priority=1)
+            # writer.create_item(table=config.reverb_table_name,
+            #                    trajectory={
+            #                      "obs": slice_leaves(writer.history["obs"], first_slice),
+            #                      "action": slice_leaves(writer.history["action"], first_slice),
+            #                      "reward": slice_leaves(writer.history["reward"], first_slice),
+            #                      "terminated": slice_leaves(writer.history["terminated"], first_slice),
+            #                      "next_obs": slice_leaves(writer.history["obs"], slice(-1)),
+            #                    }, priority=1)
           except Exception as e:
             raise e
         writer.flush()
@@ -467,7 +477,7 @@ def policy_update(batch: Batch, alpha: float, policy_state: TrainState, q1_state
 
   return policy_state, metrics
 
-
+@jit
 def alpha_update(batch: Batch, policy_state: TrainState, alpha_params: VariableDict, alpha_lr: float,
                  alpha_optimizer_params: optax.GradientTransformation, rng_key: Array) -> Tuple[
   Tuple[VariableDict, VariableDict], MetricsType]:
