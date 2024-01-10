@@ -1,22 +1,55 @@
-from typing import Any, SupportsFloat
+from typing import Any, SupportsFloat, Optional, Tuple
 
+import gymnasium as gym
+import pygame
 from gymnasium import Env, spaces
-from gymnasium.core import ObsType, ActType
+from gymnasium.core import ObsType, ActType, RenderFrame, ActionWrapper, WrapperActType
 import numpy as np
 
 
 class MixedAction2D(Env):
+  """
+  Environment mixes discrete and continuous actions.
 
-  def __init__(self):
-    self.action_space = spaces.Dict({"value": spaces.Box(low=-1, high=1, shape=(1,)), "mode": spaces.Discrete(3)})
+  On each reset a new target position is sampled. The agent's goal is to move the cursor to the target position
+  but it can only control one axis, either x or y, at a time. The agent can also signal that it is done.
+
+  target: R^2 \in [0, 1]
+  action: Dict
+    value: movement step [-1, 1] Continuous
+    mode: discrete, 0: move on x-axis, 1: move on y-axis, 2: terminate
+
+  Reward: components
+    step: -1 on each timestep
+    distance: -L2 norm of current position from target
+  """
+  metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30, }
+
+  def __init__(self, render_mode: Optional[str] = None, continuous: bool = False):
+    self.continuous = continuous
+    if self.continuous:
+      self.action_space = spaces.Dict({"value": spaces.Box(low=-1, high=1, shape=(1,)), "mode": spaces.Discrete(2)})
+    else:
+      self.action_space = spaces.Dict({"value": spaces.Box(low=-1, high=1, shape=(1,)), "mode": spaces.Discrete(3)})
+
     self.observation_space = spaces.Box(low=-1, high=1, shape=(2,))
+    self.current_pos = np.zeros(shape=(2,))
+    self.target = np.zeros(shape=(2,))
+    self.target_radius = 0.05
+
+    self.window_size = 500
+    self.window = None
+    self.clock = None
+
+    assert render_mode is None or render_mode in self.metadata["render_modes"]
+    self.render_mode = render_mode
 
   def reset(
-        self,
-        *,
-        seed: int | None = None,
-        options: dict[str, Any] | None = None,
-    ) -> tuple[ObsType, dict[str, Any]]:
+    self,
+    *,
+    seed: int | None = None,
+    options: dict[str, Any] | None = None,
+  ) -> tuple[ObsType, dict[str, Any]]:
 
     super().reset(seed=seed, options=options)
 
@@ -25,10 +58,9 @@ class MixedAction2D(Env):
 
     return self._get_obs(), {}
 
-
   def step(
-        self, action: ActType
-    ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
+    self, action: ActType
+  ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
 
     action_value = action["value"]
     terminated = False
@@ -45,11 +77,104 @@ class MixedAction2D(Env):
         # terminate
         terminated = True
 
+        if self.continuous:
+          raise Exception("Environment set continuous, but received terminated signal.")
+
     self.current_pos = np.clip(self.current_pos, a_min=0.0, a_max=1.0)
 
-    reward = -1 - np.linalg.norm(self.target - self.current_pos)
+    dist = np.linalg.norm(self.target - self.current_pos)
+    reward = -dist
+    if terminated:
+      if dist < self.target_radius:
+        reward += 100.
+      else:
+        reward *= 100.
+
+    if self.render_mode == "human":
+      self.render()
 
     return self._get_obs(), reward, terminated, truncated, {}
 
-  def _get_obs(self):
-    return self.target - self.current_pos
+  def render(self) -> RenderFrame | list[RenderFrame] | None:
+
+    def x_y_to_pix(point: np.ndarray) -> Tuple[int, int]:
+      return (int(self.window_size * point[0]), int(self.window_size * point[1]))
+
+    if self.render_mode == "human":
+      if self.window is None:
+        pygame.init()
+        pygame.display.init()
+        self.window = pygame.display.set_mode((self.window_size, self.window_size))
+
+      if self.clock is None:
+        self.clock = pygame.time.Clock()
+
+    canvas = pygame.Surface((self.window_size, self.window_size))
+    canvas.fill((255, 255, 255))
+
+    pygame.draw.circle(
+      canvas,
+      color=(0, 255, 0),
+      center=x_y_to_pix(self.target),
+      radius=self.window_size * self.target_radius
+    )
+
+    pygame.draw.circle(
+      canvas,
+      color=(0, 0, 255),
+      center=x_y_to_pix(self.current_pos),
+      radius=4
+    )
+
+    if self.render_mode == "human":
+      self.window.blit(canvas, canvas.get_rect())
+      pygame.event.pump()
+      pygame.display.update()
+      self.clock.tick(self.metadata["render_fps"])
+    else:
+      return np.transpose(np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2))
+
+  def close(self) -> None:
+    if self.window is not None:
+      pygame.display.quit()
+      pygame.quit()
+
+  def _get_obs(self) -> np.ndarray:
+    return np.array(self.target - self.current_pos, dtype=np.float32)
+
+
+gym.register("MixedAction2D-v0",
+             entry_point="triangles.env.mixed_action:MixedAction2D",
+             nondeterministic=False,
+             max_episode_steps=200)
+
+
+class ContinuousWrapper(ActionWrapper):
+
+  def __init__(self, env: gym.Env):
+    super().__init__(env)
+    self.action_space = spaces.Box(low=-1, high=1, shape=(2,), dtype=np.float32)
+
+  def action(self, action: WrapperActType) -> ActType:
+    mode = int(action[0] >= 0)
+
+    return {
+      "mode": mode,
+      "value": action[1]
+    }
+
+
+if __name__ == "__main__":
+  env = gym.make("MixedAction2D-v0", render_mode="human")
+
+  while True:
+    obs, _ = env.reset()
+    the_return = 0.
+    while True:
+      action = env.action_space.sample()
+      obs, reward, truncated, terminated, info = env.step(action)
+      the_return += reward
+
+      if truncated or terminated:
+        print(f"{the_return=}")
+        break
