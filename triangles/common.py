@@ -92,12 +92,10 @@ def atleast_2d(data: Array) -> Array:
   return data
 
 
-# def convert_batch(batch: ReplaySample) -> Dict[str, jnp.ndarray]:
-#
-#   return Batch(**jax.tree_map(lambda leaf: atleast_2d(jnp.asarray(leaf)), batch.data))
-
 def convert_batch(batch: ReplaySample) -> Dict[str, jnp.ndarray]:
-  return Batch(**{k: atleast_2d(jnp.asarray(v)) for k, v in batch.data.items()})
+
+  return Batch(**jax.tree_map(lambda leaf: atleast_2d(jnp.asarray(leaf)), batch.data))
+
 
 class FilterQueue():
 
