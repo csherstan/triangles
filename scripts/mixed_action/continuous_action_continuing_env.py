@@ -12,12 +12,12 @@ import gymnasium as gym
 
 from triangles.classic_control import policy_factory, sac_state_factory
 from triangles.common import ExpConfig, main
-from triangles.env.mixed_action import ContinuousWrapper
+from triangles.env.mixed_action import ContinuousActionContinuingEnvWrapper
 
 
 def env_factory(show: bool = False) -> gym.Env:
   env = gym.make("MixedAction2D-v0", render_mode='human' if show else 'rgb_array', continuous=True)
-  return ContinuousWrapper(env)
+  return ContinuousActionContinuingEnvWrapper(env)
 
 
 if __name__ == "__main__":

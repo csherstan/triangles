@@ -36,6 +36,7 @@ class MixedAction2D(Env):
     self.current_pos = np.zeros(shape=(2,))
     self.target = np.zeros(shape=(2,))
     self.target_radius = 0.05
+    self.max_action = 0.1
 
     self.window_size = 500
     self.window = None
@@ -69,10 +70,10 @@ class MixedAction2D(Env):
     match action["mode"]:
       case 0:
         # move on x-axis
-        self.current_pos[1] += action_value
+        self.current_pos[1] += action_value*self.max_action
       case 1:
         # move on y-axis
-        self.current_pos[0] += action_value
+        self.current_pos[0] += action_value*self.max_action
       case 2:
         # terminate
         terminated = True
@@ -149,9 +150,16 @@ gym.register("MixedAction2D-v0",
              max_episode_steps=200)
 
 
-class ContinuousWrapper(ActionWrapper):
+class ContinuousActionContinuingEnvWrapper(ActionWrapper):
 
   def __init__(self, env: gym.Env):
+    """
+    In this setting we use a continuing environment - it does not terminate, only times out.
+    So only modes 1 and 2 are used: move x, move y.
+    All actions are mapped to a continuous action space
+
+    :param env:
+    """
     super().__init__(env)
     self.action_space = spaces.Box(low=-1, high=1, shape=(2,), dtype=np.float32)
 
@@ -161,6 +169,33 @@ class ContinuousWrapper(ActionWrapper):
     return {
       "mode": mode,
       "value": action[1]
+    }
+
+
+class ContinuousActionTerminatingEnvWrapper(ActionWrapper):
+
+  def __init__(self, env: gym.Env):
+    """
+    In this setting we use a terminating environment - the agent can signal that it is finished.
+    All actions are mapped to a continuous action space:
+    action[0] - If greater > 0.0 terminate
+    action[1] - If greater > 0.0 move y axis, else move x axis
+    action[2] - Movement value
+
+    :param env:
+    """
+    super().__init__(env)
+    self.action_space = spaces.Box(low=-1, high=1, shape=(3,), dtype=np.float32)
+
+  def action(self, action: WrapperActType) -> ActType:
+    axis_movement = int(action[1] >= 0)
+    terminate = int(action[0] >= 0)
+
+    mode = 2 if terminate else axis_movement
+
+    return {
+      "mode": mode,
+      "value": action[2]
     }
 
 
