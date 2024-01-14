@@ -118,7 +118,7 @@ class MixedAction2D(Env[ObsType, ActType]):
 
         return self._get_obs(), reward, terminated, truncated, {}
 
-    def render(self) -> RenderFrame | list[RenderFrame] | None:
+    def render(self) -> np.ndarray | list[np.ndarray] | None: # type: ignore
         def x_y_to_pix(point: np.ndarray) -> Tuple[int, int]:
             return (int(self.window_size * point[0]), int(self.window_size * point[1]))
 

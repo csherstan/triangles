@@ -1,15 +1,15 @@
 import dataclasses
 from enum import Enum
 from functools import partial
-from typing import SupportsFloat, Any, List, Dict, Tuple
+from typing import SupportsFloat, Any, List, Dict, Tuple, cast
 
 import numpy as np
 from PIL import Image, ImageDraw
 from gymnasium import Env
 from gymnasium.core import spaces, RenderFrame
 
-ActType = Dict[str, Dict[str, Any]]
-ObsType = spaces.Dict
+ActType = Dict[str, Any]
+ObsType = Dict[str, Any]
 
 
 @dataclasses.dataclass
@@ -42,9 +42,10 @@ class Triangle:
         vertices = []
         for i in range(3):
             offset = i * 2 + 4
-            vertices.append(Point(*arr[offset : offset + 2]))
+            vertices.append(Point(*arr[offset: offset + 2]))
 
-        return Triangle(r=r, g=g, b=b, a=a, vertices=tuple(vertices), array=arr)
+        return Triangle(r=float(r), g=float(g), b=float(b), a=float(a),
+                        vertices=cast(Tuple[Point, Point, Point], tuple(vertices)), array=arr)
 
 
 class TriangleEnv(Env[ActType, ObsType]):
@@ -169,7 +170,7 @@ class TriangleEnv(Env[ActType, ObsType]):
         if self.energy <= 0.0:
             terminated = True
 
-        reward = -1  # a constant step penalty
+        reward = -1.  # a constant step penalty
         for v in reward_components.values():
             reward += v
 
@@ -209,7 +210,7 @@ class TriangleEnv(Env[ActType, ObsType]):
         obs = self._get_obs()
         return obs, {}
 
-    def render(self) -> RenderFrame:
+    def render(self) -> np.ndarray: # type: ignore
         return render_triangles(self.triangles, width=self.width, height=self.height)
 
     def _get_obs(self) -> Dict[str, Any]:
@@ -266,5 +267,5 @@ if __name__ == "__main__":
     for i in range(20):
         action = env.action_space.sample()
         obs, r, terminated, truncated, info = env.step(action)
-        img = env.render()
+        img: np.ndarray = env.render()
         Image.fromarray(img).show()

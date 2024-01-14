@@ -263,7 +263,7 @@ def collect(
     obs, _ = env.reset(seed=next(rng_gen)[0].item())
     transitions = []
     while True:
-        action, log_p, exploit_action = policy.apply(
+        action, log_p, exploit_action = policy.apply(   # type: ignore
             {"params": policy_params}, jnp.asarray(obs), next(rng_gen)
         )
         action = exploit_action if exploit else action
@@ -674,6 +674,10 @@ def alpha_update(
         grads, alpha_optimizer_params, alpha_params
     )
     alpha_params = optax.apply_updates(alpha_params, updates)
+
+    # TODO: I'm not sure about this.
+    alpha_params = jax.tree_map(lambda v: jnp.maximum(v, 0.01), alpha_params)
+
     metrics["loss.alpha"] = alpha_loss
 
     if isinstance(alpha_params["alpha"], dict):
