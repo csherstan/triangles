@@ -11,7 +11,6 @@ from gymnasium.core import spaces, RenderFrame
 ActType = Dict[str, Dict[str, Any]]
 ObsType = spaces.Dict
 
-from ray.rllib.models.tf.tf_modelv2 import TFModelV2
 @dataclasses.dataclass
 class Point:
   x: float
@@ -75,13 +74,15 @@ class TriangleEnv(Env[ActType, ObsType]):
     self.energy = 0.
     self.max_alpha = 0.1
 
+    # a triangle is defined by 3 vertices (x,y), alpha, color (rgb)
     triangle_space = spaces.Box(low=0, high=1, shape=(10,))
 
     self.observation_space = spaces.Dict({"error": spaces.Box(low=-1, high=1, shape=(self.width, self.height)),
                                           "triangles": spaces.Sequence(triangle_space),
                                           "energy": spaces.Box(low=0, high=np.inf)})
     self.action_space = spaces.Dict(
-      {"data": spaces.Dict({"index": spaces.Discrete(10), "triangle": triangle_space}), "op": spaces.Discrete(3)})
+      {"data": spaces.Dict({"index": spaces.Box(low=0, high=np.inf, dtype=np.int32),
+                            "triangle": triangle_space}), "op": spaces.Discrete(3)})
 
   def step(
     self, action: ActType
