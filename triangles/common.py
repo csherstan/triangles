@@ -383,25 +383,38 @@ def write_trajectory(reverb_client, reverb_table_name: str, trajectory: List[Tra
         for idx, step in enumerate(trajectory):
             writer.append(dataclasses.asdict(step))
             if idx > 0:
-                first_slice = lambda data: data[idx - 1:idx]
                 try:
-                    # writer.create_item(table=reverb_table_name,
-                    #                    trajectory={
-                    #                      "obs": writer.history["obs"][idx - 1],
-                    #                      "action": writer.history["action"][idx - 1],
-                    #                      "reward": writer.history["reward"][idx - 1],
-                    #                      "terminated": writer.history["terminated"][idx - 1],
-                    #                      "next_obs": writer.history["obs"][idx],
-                    #                    }, priority=1)
+                    """
+                    Note to self:
+                    - this did not behave as expected. So `num_keep_alive_refs` above specifies the size of the 
+                    revolving buffer. Here, I've set it to 2. However, indexing does not work as expected.
+                    
+                    Let's say I have a trajectory of length 2, named 'reward': [3, 4,].
+                    If I do: 
+                        - writer.history["reward"][0].numpy() -> 3
+                        - writer.history["reward"][1].numpy() -> 4
+                        - writer.history["reward"][2].numpy() -> 3
+                    So it allows me to access the wrap around value.
+                    
+                    Next, even though the buffer is size 2 I have to continue to advance my indices. So if I have
+                    a trajectory of length 3, named 'reward': [3, 4, 5].
+                    
+                    First create_item call:
+                        - writer.history["reward"][0].numpy() -> 3
+                        - writer.history["reward"][1].numpy() -> 4
+                    Second create_item call:
+                        - writer.history["reward"][1].numpy() -> 4
+                        - writer.history["reward"][2].numpy() -> 5                                        
+                                            
+                    """
                     writer.create_item(table=reverb_table_name,
                                        trajectory={
-                                           "obs": slice_leaves(writer.history["obs"], first_slice),
-                                           "action": slice_leaves(writer.history["action"], first_slice),
-                                           "reward": slice_leaves(writer.history["reward"], first_slice),
-                                           "terminated": slice_leaves(writer.history["terminated"], first_slice),
-                                           "next_obs": slice_leaves(writer.history["obs"],
-                                                                    lambda data: data[idx:] if idx == len(
-                                                                        trajectory) - 1 else data[idx:idx + 1]),
+                                           "obs": jax.tree_map(lambda data: data[idx-1], writer.history["obs"]),
+                                           "action": jax.tree_map(lambda data: data[idx-1], writer.history["action"]),
+                                           "reward": jax.tree_map(lambda data: data[idx-1], writer.history["reward"]),
+                                           "terminated": jax.tree_map(lambda data: data[idx-1],
+                                                                      writer.history["terminated"]),
+                                           "next_obs": jax.tree_map(lambda data: data[idx], writer.history["obs"]),
                                        }, priority=1)
                 except Exception as e:
                     raise e
@@ -786,7 +799,3 @@ def stack_dict_jnp(dict_list: List[DictArrayType]):
         for k, v in entry.items():
             ret_data.setdefault(k, []).append(v)
     return {k: jnp.array(v) for k, v in ret_data.items()}
-
-
-def slice_leaves(data: Any, slice_fn: Callable[[Any], Any]) -> Any:
-    return jax.tree_map(lambda entry: slice_fn(entry)[0], data)
