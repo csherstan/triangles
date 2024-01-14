@@ -1,8 +1,9 @@
 import os
+
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".20"
 import tensorflow as tf
 
-tf.config.set_visible_devices([], 'GPU')
+tf.config.set_visible_devices([], "GPU")
 
 import argparse
 
@@ -16,17 +17,27 @@ from triangles.env.mixed_action import ContinuousActionContinuingEnvWrapper
 
 
 def env_factory(show: bool = False) -> gym.Env:
-  env = gym.make("MixedAction2D-v0", render_mode='human' if show else 'rgb_array', continuous=True)
-  return ContinuousActionContinuingEnvWrapper(env)
+    env = gym.make(
+        "MixedAction2D-v0",
+        render_mode="human" if show else "rgb_array",
+        continuous=True,
+    )
+    return ContinuousActionContinuingEnvWrapper(env)
 
 
 if __name__ == "__main__":
-  parser = argparse.ArgumentParser()
-  parser.add_argument("mode", choices=["train", "watch"], default="train")
-  parser.add_argument("--checkpoint", type=Path, help="path to checkpoint folder")
-  args = parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("mode", choices=["train", "watch"], default="train")
+    parser.add_argument("--checkpoint", type=Path, help="path to checkpoint folder")
+    args = parser.parse_args()
 
-  config = ExpConfig(eval_frequency=500, num_eval_iterations=1)
+    config = ExpConfig(eval_frequency=500, num_eval_iterations=1)
 
-  main("mixed_action_continuous_wrapper", config, args, env_factory, policy_factory=policy_factory,
-       sac_state_factory=sac_state_factory)
+    main(
+        "mixed_action_continuous_wrapper",
+        config,
+        args,
+        env_factory,
+        policy_factory=policy_factory,
+        sac_state_factory=sac_state_factory,
+    )
