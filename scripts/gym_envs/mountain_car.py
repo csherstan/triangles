@@ -5,7 +5,7 @@ from pathlib import Path
 
 import gymnasium as gym
 
-from triangles.classic_control import policy_factory, sac_state_factory
+from triangles.model.continuous import policy_factory, sac_state_factory
 from triangles.common import ExpConfig, main
 
 

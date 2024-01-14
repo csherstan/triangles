@@ -4,7 +4,7 @@ import gymnasium as gym
 import jax
 import jax.numpy as jnp
 
-from triangles.classic_control import policy_factory, create_policy_state
+from triangles.model.continuous import create_policy_state, policy_factory
 from triangles.common import rng_seq, ExpConfig, collect
 
 """

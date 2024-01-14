@@ -4,15 +4,22 @@ TODO: Limit range for MixedAction2D
 TODO: ExpConfig has to be all jax types, otherwise it can't be passed to the jit functions.
 """
 
+import os
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".20"
+import tensorflow as tf
+
+tf.config.set_visible_devices([], 'GPU')
+
 import dataclasses
 import multiprocessing
 import time
 from datetime import datetime
+from functools import partial
 from multiprocessing import Queue, Event, Process
 from multiprocessing.synchronize import Event as EventClass
 from pathlib import Path
 from queue import Empty
-from typing import Optional, Any, Dict, Callable, Protocol, Tuple, List
+from typing import Optional, Any, Dict, Callable, Protocol, Tuple, List, Sequence
 
 import flax.serialization
 import flax.struct
@@ -37,6 +44,7 @@ import tensorflow as tf
 
 DictArrayType = Dict[str, Array]
 LOG = structlog.getLogger()
+AlphaType = float | Dict[str, "AlphaType"]
 
 PolicyType = nn.Module
 
@@ -130,7 +138,7 @@ class ExpConfig:
     batch_size: int = 256
     gamma: float = 0.99
     tau: float = 0.995  # soft-target update param, target = target*tau + active*(1-tau)
-    alpha: float = 0.5  # weight on the entropy term
+    init_alpha: AlphaType = 0.5  # weight on the entropy term
     alpha_lr: float = 3e-4  # original code base default
     num_eval_iterations: int = 3
     eval_frequency: int = 100  # how often, in model_clocks to perform an evaluation
@@ -199,10 +207,10 @@ def collect(env: gym.Env, policy: nn.Module, policy_params: VariableDict, rng_ke
             return {k: convert_action(v, action[k]) for k, v in action_space.items()}
 
         if isinstance(action_space, spaces.Discrete):
-            return as_float32(action)
+            return np.int64(action)[0]
 
         if isinstance(action_space, spaces.Box):
-            action = jnp.clip(as_float32(action), a_min=-1.0, a_max=1.0)[0]
+            action = np.clip(as_float32(action), a_min=-1.0, a_max=1.0)[0]
             return action * np.abs(action_space.high - action_space.low) / 2 + action_space.low + 1
 
         raise Exception
@@ -409,10 +417,10 @@ def write_trajectory(reverb_client, reverb_table_name: str, trajectory: List[Tra
                     """
                     writer.create_item(table=reverb_table_name,
                                        trajectory={
-                                           "obs": jax.tree_map(lambda data: data[idx-1], writer.history["obs"]),
-                                           "action": jax.tree_map(lambda data: data[idx-1], writer.history["action"]),
-                                           "reward": jax.tree_map(lambda data: data[idx-1], writer.history["reward"]),
-                                           "terminated": jax.tree_map(lambda data: data[idx-1],
+                                           "obs": jax.tree_map(lambda data: data[idx - 1], writer.history["obs"]),
+                                           "action": jax.tree_map(lambda data: data[idx - 1], writer.history["action"]),
+                                           "reward": jax.tree_map(lambda data: data[idx - 1], writer.history["reward"]),
+                                           "terminated": jax.tree_map(lambda data: data[idx - 1],
                                                                       writer.history["terminated"]),
                                            "next_obs": jax.tree_map(lambda data: data[idx], writer.history["obs"]),
                                        }, priority=1)
@@ -428,9 +436,11 @@ class Batch(struct.PyTreeNode):
     terminated: jnp.ndarray
     next_obs: PyTree
 
-
+def compute_entropy_bonus(alpha: AlphaType, logits: DictArrayType) -> Array:
+    entropy_bonus_tree = jax.tree_map(lambda weighting, logits: weighting * logits, alpha, logits)
+    return jax.tree_util.tree_reduce(lambda accumulated, num: accumulated + num, entropy_bonus_tree)
 @jit
-def q_function_update(batch: Batch, gamma: float, alpha: float, tau: float, policy_state: TrainState,
+def q_function_update(batch: Batch, gamma: float, alpha: AlphaType, tau: float, policy_state: TrainState,
                       q1_state: QTrainState,
                       q2_state: QTrainState, rng_key: Array) -> Tuple[Tuple[QTrainState, QTrainState], MetricsType]:
     rng_gen = rng_seq(rng_key=rng_key)
@@ -444,9 +454,11 @@ def q_function_update(batch: Batch, gamma: float, alpha: float, tau: float, poli
     target_values_2: Array = q2_state.apply_fn({"params": q2_state.target_params},
                                                batch.next_obs, next_sampled_actions)
 
+    # this handles single action spaces or dictionary action spaces
+    entropy_bonus = compute_entropy_bonus(alpha, next_sampled_actions_logits)
+
     q_target = batch.reward + gamma * (1 - batch.terminated) * (jnp.minimum(target_values_1,
-                                                                            target_values_2) -
-                                                                alpha * next_sampled_actions_logits)
+                                                                            target_values_2) - entropy_bonus)
 
     # Note to self: by default, value_and_grad will take the derivate of the loss (first returned val) wrt the first
     # param, so the params that we want grads for need to be the first argument.
@@ -475,7 +487,8 @@ def q_function_update(batch: Batch, gamma: float, alpha: float, tau: float, poli
 
 
 @jit
-def policy_update(batch: Batch, alpha: float, policy_state: TrainState, q1_state: QTrainState, q2_state: QTrainState,
+def policy_update(batch: Batch, alpha: AlphaType, policy_state: TrainState, q1_state: QTrainState,
+                  q2_state: QTrainState,
                   rng_key: Array) -> Tuple[TrainState, MetricsType]:
     rng_gen = rng_seq(rng_key=rng_key)
     metrics = {}
@@ -486,7 +499,8 @@ def policy_update(batch: Batch, alpha: float, policy_state: TrainState, q1_state
         q_2 = q2_state.apply_fn({"params": q2_state.params}, observations, actions)
 
         min_q = jnp.minimum(q_1, q_2)
-        loss = jnp.mean(alpha * logits - min_q)
+        entropy_bonus = compute_entropy_bonus(alpha, logits)
+        loss = jnp.mean(entropy_bonus - min_q)
 
         return loss
 
@@ -499,34 +513,48 @@ def policy_update(batch: Batch, alpha: float, policy_state: TrainState, q1_state
 
 
 @jit
-def alpha_update(batch: Batch, policy_state: TrainState, alpha_params: VariableDict, alpha_lr: float,
-                 alpha_optimizer_params: optax.GradientTransformation, rng_key: Array) -> Tuple[
-    Tuple[VariableDict, VariableDict], MetricsType]:
+def alpha_update(
+    batch: Batch,
+    policy_state: TrainState,
+    target_entropy: AlphaType,
+    alpha_params: VariableDict,
+    alpha_lr: float,
+    alpha_optimizer_params: optax.GradientTransformation,
+    rng_key: Array) -> Tuple[Tuple[VariableDict, VariableDict], MetricsType]:
     rng_gen = rng_seq(rng_key=rng_key)
     metrics = {}
 
     actions, log_p_actions, *_ = policy_state.apply_fn({"params": policy_state.params}, batch.obs, next(rng_gen))
 
-    # heuristic used in the original paper and codebase
-    target_entropy = -jnp.prod(jnp.array(actions.shape[1:]))
+    def alpha_loss_fn(alpha_params: VariableDict) -> Array:
+        element_losses = jax.tree_map(lambda alpha_param, log_p, target: -alpha_param * (log_p + target),
+                     alpha_params["alpha"],
+                     log_p_actions,
+                     target_entropy)
+        return jnp.array(jax.tree_util.tree_flatten(element_losses)[0]).mean()
 
-    alpha_loss, grads = jax.value_and_grad(
-        lambda alpha_params: -(alpha_params["alpha"] * (log_p_actions + target_entropy)).mean(), has_aux=False)(
-        alpha_params)
+    # TODO: in the case of a Dict action space it would be far more useful to keep the losses separate for metrics
+    alpha_loss, grads = jax.value_and_grad(alpha_loss_fn, has_aux=False)(alpha_params)
     updates, alpha_optimizer_params = optax.adam(learning_rate=alpha_lr).update(grads,
                                                                                 alpha_optimizer_params,
                                                                                 alpha_params)
     alpha_params = optax.apply_updates(alpha_params, updates)
     metrics["loss.alpha"] = alpha_loss
 
-    metrics["alpha"] = alpha_params["alpha"][0]
+    if isinstance(alpha_params["alpha"], dict):
+        for k, v in alpha_params["alpha"].items():
+            metrics[f"alpha.{k}"] = v[0]
+    else:
+        metrics["alpha"] = alpha_params["alpha"][0]
 
     return (alpha_params, alpha_optimizer_params), metrics
 
 
-@jit
-def train_step(batch: Batch, model_state: SACModelState, config: ExpConfig, rng_key: Array) -> Tuple[
-    SACModelState, Dict[str, float]]:
+def train_step(action_space: spaces.Space,
+               batch: Batch,
+               model_state: SACModelState,
+               config: ExpConfig,
+               rng_key: Array) -> Tuple[SACModelState, Dict[str, float]]:
     """
     Things to watch for:
     - silent broadcasting.
@@ -547,7 +575,7 @@ def train_step(batch: Batch, model_state: SACModelState, config: ExpConfig, rng_
     policy_state = model_state.policy_state
     q1_state = model_state.q1_state
     q2_state = model_state.q2_state
-    alpha = model_state.alpha_params["alpha"][0]
+    alpha = model_state.alpha_params["alpha"]
 
     (q1_state, q2_state), q_metrics = q_function_update(batch=batch,
                                                         gamma=config.gamma,
@@ -570,11 +598,26 @@ def train_step(batch: Batch, model_state: SACModelState, config: ExpConfig, rng_
     # alpha_params = model_state.alpha_params
     # alpha_optimizer_params = model_state.alpha_optimizer_params
 
-    (alpha_params, alpha_optimizer_params), alpha_metrics = alpha_update(batch=batch, policy_state=policy_state,
-                                                                         alpha_params=model_state.alpha_params,
-                                                                         alpha_lr=config.alpha_lr,
-                                                                         alpha_optimizer_params=model_state.alpha_optimizer_params,
-                                                                         rng_key=next(rng_gen))
+    # heuristic used in the original paper and codebase
+    def compute_target_entropy(action_space: spaces.Space) -> AlphaType:
+        if isinstance(action_space, spaces.Box):
+            return -jnp.prod(jnp.array(action_space.shape))
+        elif isinstance(action_space, spaces.Discrete):
+            return -action_space.n
+        elif isinstance(action_space, spaces.Dict):
+            return {k: compute_target_entropy(v) for k, v in action_space.items()}
+        assert f"Unsupported space {type(action_space)}"
+
+    target_entropy = compute_target_entropy(action_space)
+    (alpha_params, alpha_optimizer_params), alpha_metrics = alpha_update(
+        batch=batch,
+        policy_state=policy_state,
+        target_entropy=target_entropy,
+        alpha_params=model_state.alpha_params,
+        alpha_lr=config.alpha_lr,
+        alpha_optimizer_params=model_state.alpha_optimizer_params,
+        rng_key=next(rng_gen)
+    )
 
     metrics.update(alpha_metrics)
 
@@ -602,7 +645,10 @@ class RWModel:
 SACStateFactory = Callable[[ExpConfig, gym.Env, nn.Module, Array], SACModelState]
 
 
-def train(name: str, config: ExpConfig, env_factory: EnvFactoryType, policy_factory: PolicyFactoryType,
+def train(name: str,
+          config: ExpConfig,
+          env_factory: EnvFactoryType,
+          policy_factory: PolicyFactoryType,
           sac_state_factory: SACStateFactory) -> None:
     """
     Note: moving everything into a main function, instead of leaving it tucked under if __name__=="__main__", can
@@ -722,7 +768,11 @@ def train(name: str, config: ExpConfig, env_factory: EnvFactoryType, policy_fact
                               int(sac_state.model_clock))
 
         batch = convert_batch(list(dataset.take(1))[0])
-        new_sac_state, metrics = train_step(batch, sac_state, config=config, rng_key=next(rng_gen))
+        new_sac_state, metrics = train_step(action_space=env.action_space,
+                                            batch=batch,
+                                            model_state=sac_state,
+                                            config=config,
+                                            rng_key=next(rng_gen))
 
         sac_state = new_sac_state
         model_clock = int(sac_state.model_clock)
@@ -730,9 +780,17 @@ def train(name: str, config: ExpConfig, env_factory: EnvFactoryType, policy_fact
         send_model(model_clock)
         save_checkpoint(sac_state, model_clock)
 
+        def write_metric(data: Any, prefixes: Optional[Sequence[str]] = None) -> None:
+            prefixes = prefixes or []
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    write_metric(v, [] + [k])
+            else:
+                summary_writer.scalar(".".join(prefixes), float(data), model_clock)
+
+
         # ---- write metrics
-        for k, v in metrics.items():
-            summary_writer.scalar(k, float(v), model_clock)
+        write_metric(metrics)
 
         try:
             while True:
