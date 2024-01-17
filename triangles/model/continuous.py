@@ -20,7 +20,7 @@ from triangles.types import PolicyReturnType, PolicyType, NestedArray
 from triangles.util import rng_seq
 
 
-class Policy(PolicyType, nn.Module):
+class Policy(PolicyType):
     """
     MLP. Action space is continuous and passed through tanh: bound to [-1, 1].
     """

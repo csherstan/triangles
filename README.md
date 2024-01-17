@@ -1,28 +1,35 @@
-https://github.com/google/brain-tokyo-workshop/tree/master/es-clip
+# Goals
 
-## Goals
-
-The main goal here is practice, because of that I'm making choices that might not be optimal in terms
+The main goal here is practice. Because of that I'm making choices that might not be optimal in terms
 of producing a desired output in the least amount of time. Also, some of these choices/tech stacks are new to me
 and my implementations will likely be suboptimal. I'm also using this as an opportunity to experiment
 with some coding practices.
 
-1. Implementation in JAX and FLAX.
-2. Model must use a Transformer to handle variable number of triangles.
-3. RL policy should mix discrete and continuous actions.
-4. RL algorithm should be implemented by me. Too often I've simply relied on using someone elses implementation.
-5. Choosing to implement SAC - or at least start there. The reason being that this has been a fundamental alg in the
+
+1. Implementation in JAX and FLAX (these are new to me).
+2. The RL policy should mix discrete and continuous actions.
+3. The RL algorithm should be implemented by me - don't just use someone else's code here.
+4. Choosing to implement SACv2 - or at least start there. The reason being that this has been a fundamental alg in the
 work I've been doing for the past 3 years, but I don't know it well because someone else has always implemented it for
 me.
-6. Avoid writing libraries or code that gets reused: write it again. A goal here is practice, not code reuse.
+5. A goal here is practice, not code reuse, so I'm not trying to write libraries.
 
-## Installing Jax from Poetry
+## Completed
 
-```
-$ poetry source add jax https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-$ poetry add --source jax jaxlib
-$ poetry add jax
-```
+1. Here I have implemented an asynchronous version of SACv2 using JAX and FLAX. There is a single trainer process, and
+multiple child processes (rollout workers). The rollout workers receive models from the trainer and use
+those to collect rollout trajectories in the target environment. These are written into the trainer's replay 
+buffer using the DeepMind Reverb library.
+2. Successful training on baseline continuous action space environments including Pendulum and MountainCar.
+3. Developed a gym environment that has a mixed action space with both discrete and continuous actions: MixedAction2D.
+4. Successful training on MixedAction2D by mapping the discrete space to a continuous one.
+
+## Future Goals
+
+1. Successful training on MixedAction2D using a policy that works in the mixed action space such that it is aware of
+the relationship between the discrete and continuous action choices.
+2. Use transformers. When I created this project it was with the intention to use this code for training a particular
+environment that has 1) mixed action space and 2) variable observation space. I still hope to complete that project.
 
 ## Coding principles
 
@@ -57,3 +64,11 @@ anywhere that I've returned a Tuple (like in the various loss functions), I crin
 4. While I haven't included them in the `main` branch, I have started working on models that use mixed action spaces. 
 Because of this there is already code in sac.py that handles various nested structures, which might seem unnecessary
 at this point.
+
+## Installing Jax from Poetry
+
+```
+$ poetry source add jax https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+$ poetry add --source jax jaxlib
+$ poetry add jax
+```

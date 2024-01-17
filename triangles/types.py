@@ -1,5 +1,5 @@
 # Copyright Craig Sherstan 2024
-from typing import Any, Optional, Union, Callable, Protocol, Mapping
+from typing import Any, Optional, Union, Callable, Protocol, Mapping, runtime_checkable, cast
 
 import flax.struct
 import numpy as np
@@ -15,7 +15,6 @@ NestedArray = Array | Mapping[str, "NestedArray"]
 NestedNPArray = np.ndarray | Mapping[str, "NestedNPArray"]
 
 
-
 class PolicyReturnType(flax.struct.PyTreeNode):
     """
     It's not fun creating containers for all the returns, but I do like the potential
@@ -23,7 +22,7 @@ class PolicyReturnType(flax.struct.PyTreeNode):
 
     I'll likely use this pattern throughout.
     """
-    sampled_actions: NestedArray    # these are actions that are stochastic, for exploration
+    sampled_actions: NestedArray  # these are actions that are stochastic, for exploration
     log_probabilities: NestedArray  # log probabilities of the sampled_actions.
     deterministic_actions: NestedArray  # deterministic actions
 
@@ -33,24 +32,23 @@ class PolicyType(nn.Module):
         raise NotImplementedError
 
     def apply(
-      self,
-      variables: VariableDict,
-      *args: Any,
-      rngs: Optional[RNGSequences] = None,
-      method: Union[Callable[..., Any], str, None] = None,
-      mutable: CollectionFilter = False,
-      capture_intermediates: Union[
-          bool, Callable[['nn.Module', str], bool]
-      ] = False,
-      **kwargs: Any,
+        self,
+        variables: VariableDict,
+        *args: Any,
+        rngs: Optional[RNGSequences] = None,
+        method: Union[Callable[..., Any], str, None] = None,
+        mutable: CollectionFilter = False,
+        capture_intermediates: Union[
+            bool, Callable[['nn.Module', str], bool]
+        ] = False,
+        **kwargs: Any,
     ) -> PolicyReturnType:
         """
         I'm just explicitly defining this so I can set the return type
         """
-        raise NotImplementedError
-
-
-
+        f = super().apply
+        return cast(PolicyReturnType,
+                    super().apply(variables, *args, rngs=rngs, method=method, mutable=mutable, capture_intermediates=capture_intermediates, **kwargs))
 
 
 class MetricWriter(Protocol):

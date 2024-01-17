@@ -573,7 +573,7 @@ def q_function_update(
     gamma: float,
     alpha_params: AlphaType,
     tau: float,
-    policy_state: TrainState,
+    policy_state: PolicyTrainState,
     q1_state: QTrainState,
     q2_state: QTrainState,
     rng_key: Array,
@@ -605,23 +605,23 @@ def q_function_update(
     """
 
     rng_gen = rng_seq(rng_key=rng_key)
-    metrics = {}
+    metrics: Dict[str, Any] = {}
 
     # sample actions a_{t+1}
-    next_sampled_actions, next_sampled_actions_logits, *_ = policy_state.apply_fn(
+    next_state_policy_result = policy_state.apply_fn(
         {"params": policy_state.params}, batch.next_obs, next(rng_gen)
     )
 
     # get the Q-target value estimates for \tilde{Q}(s_{t+1},a_{t+1})
     target_values_1: Array = q1_state.apply_fn(
-        {"params": q1_state.target_params}, batch.next_obs, next_sampled_actions
+        {"params": q1_state.target_params}, batch.next_obs, next_state_policy_result.sampled_actions
     )
     target_values_2: Array = q2_state.apply_fn(
-        {"params": q2_state.target_params}, batch.next_obs, next_sampled_actions
+        {"params": q2_state.target_params}, batch.next_obs, next_state_policy_result.sampled_actions
     )
 
     # this handles single action spaces or dictionary action spaces
-    entropy_bonus = compute_entropy_bonus(alpha_params, next_sampled_actions_logits)
+    entropy_bonus = compute_entropy_bonus(alpha_params, next_state_policy_result.log_probabilities)
 
     # r_{t+1} + \gamma * (1-done) * Q_min(s_{t+1}, a_{t+1}~\pi(s_{t+1}) - entropy bonus
     prediction_target = batch.reward + gamma * (1 - batch.terminated) * (
@@ -727,7 +727,7 @@ def policy_update(
 @jit
 def alpha_update(
     batch: Batch,
-    policy_state: TrainState,
+    policy_state: PolicyTrainState,
     target_entropy: AlphaType,
     alpha_params: AlphaType,
     alpha_lr: float,
@@ -756,7 +756,7 @@ def alpha_update(
     metrics = {}
 
     # Sample actions/log_probs for state S
-    actions, log_p_actions, *_ = policy_state.apply_fn(
+    policy_result = policy_state.apply_fn(
         {"params": policy_state.params}, batch.obs, next(rng_gen)
     )
 
@@ -767,7 +767,7 @@ def alpha_update(
         element_losses = jax.tree_map(
             lambda alpha, log_p, target: -alpha * (log_p + target),
             calculate_alpha(alpha_params),
-            log_p_actions,
+            policy_result.log_probabilities,
             target_entropy,
         )
         return jnp.array(jax.tree_util.tree_flatten(element_losses)[0]).mean()
@@ -819,12 +819,11 @@ def train_step(
     policy_state = model_state.policy_state
     q1_state = model_state.q1_state
     q2_state = model_state.q2_state
-    alpha = model_state.alpha_params["alpha"]
 
     (q1_state, q2_state), q_metrics = q_function_update(
         batch=batch,
         gamma=config.gamma,
-        alpha_params=alpha,
+        alpha_params=model_state.alpha_params,
         tau=config.tau,
         policy_state=policy_state,
         q1_state=q1_state,
@@ -835,7 +834,7 @@ def train_step(
 
     policy_state, policy_metrics = policy_update(
         batch=batch,
-        alpha_params=alpha,
+        alpha_params=model_state.alpha_params,
         policy_state=policy_state,
         q1_state=q1_state,
         q2_state=q2_state,
@@ -906,7 +905,7 @@ def serialize_model(policy_state: PolicyTrainState, model_clock: int) -> bytes:
         )
 
 def deserialize_model(received: Any) -> Dict[str, Any]:
-    return flax.serialization.msgpack_restore(bytearray(received))
+    return cast(Dict[str, Any], flax.serialization.msgpack_restore(bytearray(received)))
 
 def train_loop(
     name: str,
@@ -1032,7 +1031,7 @@ def train_loop(
         Process(
             target=rollout_worker_fn,
             kwargs={
-                "idx": i,
+                "rw_id": i,
                 "shutdown": terminate_event,
                 "env_factory": env_factory,
                 "policy_factory": policy_factory,
