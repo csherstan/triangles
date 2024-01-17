@@ -113,6 +113,18 @@ python scripts/experiments/mixed_action/continuous_action_terminating_env.py tra
 ![continuous_action_terminating_env eval return](https://github.com/csherstan/triangles/blob/main/img/mixed_action/continuous_action_terminating_env/eval_return.png)
 
 
+## Installation
+
+```bash
+git clone git@github.com:csherstan/triangles.git
+cd triangles
+poetry install
+poetry shell
+python scripts/experiments/gym_envs/pendulum.py train
+```
+
+Output data will be written to `data/pendulum`. Watch training: `tensorboard --logdir data/pendulum`
+
 ## Notes to self
 
 ### Installing Jax from Poetry
