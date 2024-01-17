@@ -81,7 +81,7 @@ $ poetry add jax
 python /home/sherstancraig/work/triangles/scripts/experiments/gym_envs/pendulum.py train
 ```
 
-![pendulum eval return](/home/sherstancraig/work/triangles/img/pendulum/gym_envs/eval_return.png)
+![pendulum eval return](https://github.com/csherstan/triangles/blob/main/img/gym_envs/pendulum/eval_return.png)
 
 ### Mountain Car
 
@@ -89,7 +89,7 @@ python /home/sherstancraig/work/triangles/scripts/experiments/gym_envs/pendulum.
 python /home/sherstancraig/work/triangles/scripts/experiments/gym_envs/mountain_car.py train
 ```
 
-![mountain car eval return](/home/sherstancraig/work/triangles/img/mountain_car/gym_envs/eval_return.png)
+![mountain car eval return](https://github.com/csherstan/triangles/blob/main/img/gym_envs/mountain_car/eval_return.png)
 
 ### MixedAction2D
 
