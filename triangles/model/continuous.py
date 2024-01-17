@@ -1,27 +1,38 @@
-from typing import Tuple, cast
+"""
+Straightforward MLP Policy and QFunctions for continuous action space.
+Actions are all passed through a tanh activation so they are bound to [-1, 1].
+Assumes the action space is spaces.Box
+"""
+
+from typing import cast
 
 import distrax
 import gymnasium as gym
 import optax
 from flax import linen as nn
-from flax.training.train_state import TrainState
 from jax import Array, numpy as jnp
 from gymnasium import spaces
 
-from triangles.common import rng_seq, ExpConfig, QTrainState, SACModelState, PolicyType
+from triangles.sac import ExpConfig, QTrainState, SACModelState, PolicyTrainState
+from triangles.types import PolicyReturnType, PolicyType, NestedArray
+from triangles.util import rng_seq
 
 
-class Policy(nn.Module):
+class Policy(PolicyType, nn.Module):
+    """
+    MLP. Action space is continuous and passed through tanh: bound to [-1, 1].
+    """
     action_size: int
 
     @nn.compact
     def __call__(
-        self, observations: Array, rng_key: Array
-    ) -> Tuple[Array, Array, Array]:
+        self, observations: NestedArray, rng_key: Array
+    ) -> PolicyReturnType:
+        assert isinstance(observations, jnp.ndarray)
+
         observations = jnp.atleast_2d(observations)  # add batch dim if not present
         rng_gen = rng_seq(rng_key=rng_key)
 
-        # TODO: for the moment I'm hardcoding some vals just for pendulum
         x = nn.Sequential(
             [
                 nn.Dense(256),
@@ -32,6 +43,7 @@ class Policy(nn.Module):
         )(observations)
 
         means = nn.Dense(self.action_size)(x)
+
         # log_std_dev is defined on [-inf, inf]
         log_std_dev = nn.Dense(self.action_size)(x)
         std_dev = jnp.exp(log_std_dev)
@@ -43,7 +55,8 @@ class Policy(nn.Module):
 
         actions, action_log_prob = dist.sample_and_log_prob(seed=next(rng_gen))
 
-        return actions, jnp.expand_dims(action_log_prob, -1), jnp.tanh(means)
+        return PolicyReturnType(sampled_actions=actions, log_probabilities=jnp.expand_dims(action_log_prob, -1),
+                                deterministic_actions=jnp.tanh(means))
 
 
 class QFunction(nn.Module):
@@ -61,19 +74,17 @@ class QFunction(nn.Module):
 
 def create_policy_state(
     env: gym.Env, policy: PolicyType, config: ExpConfig, rng_key: Array
-) -> TrainState:
+) -> PolicyTrainState:
     rng_gen = rng_seq(rng_key=rng_key)
     init_samples = [env.observation_space.sample(), env.observation_space.sample()]
     output, policy_variables = policy.init_with_output(
         next(rng_gen), jnp.array(init_samples), next(rng_gen)
     )
-    policy_state: TrainState = TrainState.create(
+    policy_state: PolicyTrainState = PolicyTrainState.create(
         apply_fn=policy.apply,
         params=policy_variables["params"],
         tx=optax.adam(
             learning_rate=config.policy_learning_rate,
-            b1=config.adam_beta_1,
-            b2=config.adam_beta_2,
         ),
     )
 
@@ -95,8 +106,6 @@ def create_q_state(env: gym.Env, config: ExpConfig, rng_key: Array) -> QTrainSta
         params=q_variables["params"],
         tx=optax.adam(
             learning_rate=config.q_learning_rate,
-            b1=config.adam_beta_1,
-            b2=config.adam_beta_2,
         ),
         target_params=q_variables["params"],
     )
@@ -110,9 +119,7 @@ def policy_factory(env: gym.Env) -> Policy:
     return Policy(action_size=action_size)
 
 
-def sac_state_factory(
-    config: ExpConfig, env: gym.Env, policy: PolicyType, rng_key: Array
-) -> SACModelState:
+def sac_state_factory(config: ExpConfig, env: gym.Env, policy: PolicyType, rng_key: Array) -> SACModelState:
     rng_gen = rng_seq(rng_key=rng_key)
     policy_state = create_policy_state(
         env=env, policy=policy, config=config, rng_key=next(rng_gen)
@@ -121,7 +128,7 @@ def sac_state_factory(
     q2_state = create_q_state(env, config, next(rng_gen))
 
     # although alpha is a scalar, it needs to have a dimension for jax.grad to be happy
-    alpha_params = {"alpha": jnp.array([config.init_alpha])}
+    alpha_params = {"alpha": jnp.log(jnp.array([config.init_alpha]))}
 
     return SACModelState(
         policy_state=policy_state,

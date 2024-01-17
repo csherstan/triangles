@@ -3,31 +3,39 @@ from typing import Any, SupportsFloat, Optional, Tuple, Dict, Union
 import gymnasium as gym
 import pygame
 from gymnasium import Env, spaces
-from gymnasium.core import RenderFrame, ActionWrapper, WrapperActType
+from gymnasium.core import ActionWrapper
 import numpy as np
-from numpy._typing import ArrayLike
 from pygame import Surface
 from pygame.time import Clock
 
 ObsType = np.ndarray
 ActType = Dict[str, Union[np.ndarray, int, float]]
 
-
 class MixedAction2D(Env[ObsType, ActType]):
     """
     Environment mixes discrete and continuous actions.
 
+    The environment is a 2D x-y space where each axis goes from 0 to 1. The goal is to move the agent's cursor to
+    the goal region.
+
     On each reset a new target position is sampled. The agent's goal is to move the cursor to the target position
     but it can only control one axis, either x or y, at a time. The agent can also signal that it is done.
 
+    The environment can be set to `continuing`, meaning that it does not terminate, but will still timeout.
+
     target: R^2 \in [0, 1]
     action: Dict
-      value: movement step [-1, 1] Continuous
+      value: movement step [-1, 1] Continuous. In the environment this is mapped to [-0.1, 0.1]
       mode: discrete, 0: move on x-axis, 1: move on y-axis, 2: terminate
 
+    observation:
+
+
     Reward: components
-      step: -1 on each timestep
-      distance: -L2 norm of current position from target
+      distance (not terminating): -L2 norm of current position from target
+      on termination:
+        - if in the goal (green circle of radius 0.05) get +100
+        - if not in the goal region -(100 +L2 norm)
     """
 
     metadata = {
@@ -35,9 +43,11 @@ class MixedAction2D(Env[ObsType, ActType]):
         "render_fps": 30,
     }
 
-    def __init__(self, render_mode: Optional[str] = None, continuous: bool = False):
-        self.continuous = continuous
-        if self.continuous:
+    def __init__(self, render_mode: Optional[str] = None, continuing: bool = False):
+        self.continuing = continuing
+
+        # if continuing the environment does not terminate except by timeout. The terminate action is not used.
+        if self.continuing:
             self.action_space = spaces.Dict(
                 {
                     "value": spaces.Box(low=-1, high=1, shape=(1,)),
@@ -52,12 +62,18 @@ class MixedAction2D(Env[ObsType, ActType]):
                 }
             )
 
-        self.observation_space = spaces.Box(low=-1, high=1, shape=(2,))
+        self.observation_space = spaces.Box(low=-1, high=1, shape=(3,))
+
         self.current_pos = np.zeros(shape=(2,))
-        self.target = np.zeros(shape=(2,))
+        self.target_pos = np.zeros(shape=(2,))
+
+        # being within this radius is the goal
         self.target_radius = 0.05
+
+        # action maxes are rescaled to this value.
         self.max_action = 0.1
 
+        # used for rendering
         self.window_size = 500
         self.window: Optional[Surface] = None
         self.clock: Optional[Clock] = None
@@ -72,10 +88,17 @@ class MixedAction2D(Env[ObsType, ActType]):
         options: dict[str, Any] | None = None,
     ) -> tuple[ObsType, dict[str, Any]]:
 
+        """
+        Randomly draws a new starting position and target position
+        :param seed: Random seed to use.
+        :param options: Not used
+        :return: Obs, empty dict
+        """
+
         super().reset(seed=seed, options=options)
 
-        self.target = np.random.random(size=(2,))
-        self.current_pos = np.random.random(size=(2,))
+        self.target_pos = self.np_random.random(size=(2,))
+        self.current_pos = self.np_random.random(size=(2,))
 
         return self._get_obs(), {}
 
@@ -83,11 +106,13 @@ class MixedAction2D(Env[ObsType, ActType]):
         self, action: ActType
     ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
 
-        action_value = action["value"]
+        action_value = action["value"] # the movement value
         terminated = False
         truncated = False
 
+        # discrete action selection: either x or y axis or terminate
         match action["mode"]:
+            # TODO: use enum
             case 0:
                 # move on x-axis
                 self.current_pos[1] += action_value * self.max_action
@@ -98,27 +123,27 @@ class MixedAction2D(Env[ObsType, ActType]):
                 # terminate
                 terminated = True
 
-                if self.continuous:
+                if self.continuing:
                     raise Exception(
-                        "Environment set continuous, but received terminated signal."
+                        "Environment set to continuing, but received terminated signal."
                     )
 
         self.current_pos = np.clip(self.current_pos, a_min=0.0, a_max=1.0)
 
-        dist = np.linalg.norm(self.target - self.current_pos)
-        reward = -dist
+        dist = np.linalg.norm(self.target_pos - self.current_pos)
+        reward = -float(dist)
         if terminated:
             if dist < self.target_radius:
-                reward += 100.0
+                reward = 100.0
             else:
-                reward *= 100.0
+                reward -= 100.0
 
         if self.render_mode == "human":
             self.render()
 
         return self._get_obs(), reward, terminated, truncated, {}
 
-    def render(self) -> np.ndarray | list[np.ndarray] | None: # type: ignore
+    def render(self) -> np.ndarray | list[np.ndarray] | None:  # type: ignore
         def x_y_to_pix(point: np.ndarray) -> Tuple[int, int]:
             return (int(self.window_size * point[0]), int(self.window_size * point[1]))
 
@@ -139,7 +164,7 @@ class MixedAction2D(Env[ObsType, ActType]):
         pygame.draw.circle(
             canvas,
             color=(0, 255, 0),
-            center=x_y_to_pix(self.target),
+            center=x_y_to_pix(self.target_pos),
             radius=self.window_size * self.target_radius,
         )
 
@@ -166,15 +191,20 @@ class MixedAction2D(Env[ObsType, ActType]):
             pygame.quit()
 
     def _get_obs(self) -> np.ndarray:
-        return np.array(self.target - self.current_pos, dtype=np.float32)
+        """
+        :return: First two elements are the positional error and the final element is the distance from the target
+        """
+        return np.concatenate([np.array(self.target_pos - self.current_pos, dtype=np.float32),
+                               np.array([np.linalg.norm(self.target_pos - self.current_pos)])])
 
 
 gym.register(
     "MixedAction2D-v0",
     entry_point="triangles.env.mixed_action:MixedAction2D",
     nondeterministic=False,
-    max_episode_steps=200,
+    max_episode_steps=100,
 )
+
 
 # The generics don't seem right here. Looking at the ActionWrapper it wants 4, but mypy says it needs only 3.
 class ContinuousActionContinuingEnvWrapper(ActionWrapper[ObsType, np.ndarray, ActType]):
@@ -226,7 +256,8 @@ if __name__ == "__main__":
         the_return = 0.0
         while True:
             action = env.action_space.sample()
-            obs, reward, truncated, terminated, info = env.step(action)
+            action["mode"] = 0
+            obs, reward, terminated, truncated, info = env.step(action)
             the_return += float(reward)
 
             if truncated or terminated:

@@ -1,20 +1,32 @@
 import pytest
 
-from triangles.common import (
+from triangles.sac import (
     write_trajectory,
-    space_to_reverb_spec,
     TransitionStep,
-    as_float32,
 )
+from triangles.util import as_float32, space_to_reverb_spec
 import reverb
 import gymnasium as gym
 import tensorflow as tf
-import triangles.env.mixed_action
 import numpy as np
+
+# do not remove, needed for MixedAction2D to be registered with gym.
+import triangles.env.mixed_action # noqa
 
 
 @pytest.mark.parametrize("env_name", ["Pendulum-v1", "MixedAction2D-v0"])
 def test_write_trajectory(env_name: str):
+    """
+    Writes a short trajectory to the reverb buffer, reads it back out and checks that everything is in
+    the correct order.
+
+    The test is conducted for Pendulum, which has a Box action and observation space, and MixedAction2D, which has
+    a Dict action space. This required extra work in order to accommodate both.
+
+    :param env_name: name of the gym env to use for testing
+    :return:
+    """
+
     env = gym.make(env_name)
 
     trajectory = [
