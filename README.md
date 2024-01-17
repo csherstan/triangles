@@ -78,7 +78,7 @@ $ poetry add jax
 ### Pendulum
 
 ```bash
-python /home/sherstancraig/work/triangles/scripts/experiments/gym_envs/pendulum.py train
+python scripts/experiments/gym_envs/pendulum.py train
 ```
 
 ![pendulum eval return](https://github.com/csherstan/triangles/blob/main/img/gym_envs/pendulum/eval_return.png)
@@ -86,7 +86,7 @@ python /home/sherstancraig/work/triangles/scripts/experiments/gym_envs/pendulum.
 ### Mountain Car
 
 ```bash
-python /home/sherstancraig/work/triangles/scripts/experiments/gym_envs/mountain_car.py train
+python scripts/experiments/gym_envs/mountain_car.py train
 ```
 
 ![mountain car eval return](https://github.com/csherstan/triangles/blob/main/img/gym_envs/mountain_car/eval_return.png)
@@ -99,9 +99,14 @@ location is selected. The agent's goal is to move into the target zone (area aro
 that it is done.
 
 The agent can only move in either x or y on each turn and must select which axis to move on and by how much.
-Finally it can signal that is done. See [/home/sherstancraig/work/triangles/triangles/env/mixed_action.py] for more 
+Finally it can signal that is done. See [triangles/env/mixed_action.py] for more 
 info.
 
+```bash
+python scripts/experiments/mixed_action/continuous_action_terminating_env.py train
+```
+
+![continuous_action_terminating_env eval return](https://github.com/csherstan/triangles/blob/main/img/mixed_action/continuous_action_terminating_env/eval_return.png)
 
 
 
