@@ -23,6 +23,7 @@ tensorflow = "2.15.0"
 tensorflow-probability = "^0.23.0"
 tqdm = "^4.66.1"
 pytest = "^7.4.4"
+git-lfs = "^1.6"
 
 
 

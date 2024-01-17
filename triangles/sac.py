@@ -220,7 +220,7 @@ def collect(
     saved in the replay buffer and any scaling that needs to be done will happen before being sent the environment
 
     :param env: Environment
-    :param policy: Policy
+    :param policy: The policy nn.Module
     :param policy_params: policy params
     :param rng_key: random key
     :param exploit: if set to True, will use the deterministic output of the policy rather than the sampled ones.
@@ -855,10 +855,11 @@ def train_step(
     - min/max operations that reduce when you expect them to be elementwise.
     - accessing elements that can't be traced by jax.
 
-    :param batch:   # batch of trajectories
-    :param model_state: # model/alg params
-    :param config:  # Experiment config
-    :param rng_key: # random key
+    :param action_space: Action space of the environment
+    :param batch:   batch of trajectories
+    :param model_state: model/alg params
+    :param config:  Experiment config
+    :param rng_key: random key
     :return: Tuple[Model state, metrics]
     """
 
@@ -979,11 +980,11 @@ def train_loop(
     steps. However, if the time taken by the eval process is long than the time taken to generate the next eval's model
     clock, then the eval process will never catch up. Three ways we could resolve this: 1. Record collection trajectory
     returns instead (this doesn't really give us the data we want). 2. Launch evals as a completely separate process.
-    3. Pause training and rollout collection while evals are running. My preference is option 2 - use a separate process.
+    3. Pause training and rollout collection while evals are running. My preference is option 2 - use a separate process
 
     Note: moving everything into a main function, instead of leaving it tucked under if __name__=="__main__", can
     address two problems:
-      - It can be written in such a way as to be a reusable entry point, callable from different scripts (not done here).
+      - It can be written in such a way as to be a reusable entry point, callable from different scripts (not done here)
       - It prevents variables from being exposed as global. Global vars caused at least one problem for me here when
       using autocomplete in my IDE.
 
@@ -1023,6 +1024,7 @@ def train_loop(
         writing the value.
 
         :param data: The data to write
+        :param model_clock: model clock associated with the metric
         :param names: metric name prefix. It will be recursively built for nested metrics, ex. ["loss", "q"]
         :return: None
         """
@@ -1081,7 +1083,7 @@ def train_loop(
     # ------ Set up processes for data collection.
     terminate_event: EventClass = Event()
 
-    model_queues = [FilteredModelQueue() for i in range(config.num_rw_workers)]
+    model_queues = [FilteredModelQueue() for _ in range(config.num_rw_workers)]
     processes = [
         Process(
             target=rollout_worker_fn,
@@ -1206,6 +1208,8 @@ def train_loop(
             pass
 
         summary_writer.flush()
+
+    # I don't actually have a graceful way to terminate at this point so this code is never reached.
 
     terminate_event.set()
 

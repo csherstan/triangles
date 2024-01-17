@@ -72,3 +72,42 @@ $ poetry source add jax https://storage.googleapis.com/jax-releases/jax_cuda_rel
 $ poetry add --source jax jaxlib
 $ poetry add jax
 ```
+
+## Results
+
+### Pendulum
+
+```bash
+python /home/sherstancraig/work/triangles/scripts/experiments/gym_envs/pendulum.py train
+```
+
+![pendulum eval return](/home/sherstancraig/work/triangles/img/pendulum/gym_envs/eval_return.png)
+
+### Mountain Car
+
+```bash
+python /home/sherstancraig/work/triangles/scripts/experiments/gym_envs/mountain_car.py train
+```
+
+![mountain car eval return](/home/sherstancraig/work/triangles/img/mountain_car/gym_envs/eval_return.png)
+
+### MixedAction2D
+
+This is a simple environment that has a mixed action space: discrete and continuous actions.
+The world is a bound 2D x-y arena. On each reset the agent is randomly placed in the environment and a new target
+location is selected. The agent's goal is to move into the target zone (area around the target location) and signal
+that it is done.
+
+The agent can only move in either x or y on each turn and must select which axis to move on and by how much.
+Finally it can signal that is done. See [/home/sherstancraig/work/triangles/triangles/env/mixed_action.py] for more 
+info.
+
+
+
+
+
+
+
+
+
+

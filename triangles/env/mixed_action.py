@@ -200,7 +200,7 @@ class MixedAction2D(Env[ObsType, ActType]):
         return np.concatenate(
             [
                 np.array(self.target_pos - self.current_pos, dtype=np.float32),
-                np.array([np.linalg.norm(self.target_pos - self.current_pos)]),
+                np.array([np.linalg.norm(self.target_pos - self.current_pos)], dtype=np.float32),
             ]
         )
 
