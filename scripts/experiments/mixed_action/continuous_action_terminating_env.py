@@ -1,3 +1,5 @@
+# Copyright Craig Sherstan 2024
+
 """
 Trains an agent on MixedAction2D. However, for this version all of the discrete actions are
 converted to continuous actions.

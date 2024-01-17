@@ -1,3 +1,5 @@
+# Copyright Craig Sherstan 2024
+
 from typing import Any, SupportsFloat, Optional, Tuple, Dict, Union
 
 import gymnasium as gym

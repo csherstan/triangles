@@ -1,3 +1,5 @@
+# Copyright Craig Sherstan 2024
+
 """
 A utility script for measuring processing time for several processes:
 1. The rate at which MountainCar runs
@@ -16,7 +18,7 @@ import jax
 import jax.numpy as jnp
 
 from triangles.model.continuous import create_policy_state, policy_factory
-from triangles.common import ExpConfig, collect
+from triangles.sac import ExpConfig, collect
 from triangles.util import rng_seq
 
 """

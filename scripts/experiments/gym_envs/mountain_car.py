@@ -1,3 +1,4 @@
+# Copyright Craig Sherstan 2024
 """
 Experiment for the continuous (continuous action space) version of MountainCar
 """

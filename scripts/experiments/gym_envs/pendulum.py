@@ -1,3 +1,4 @@
+# Copyright Craig Sherstan 2024
 """
 Trains an agent on the Pendulum environment, which has a continuous action space
 """

@@ -1,12 +1,11 @@
-from typing import Optional, Iterator, Any, Dict, List
+# Copyright Craig Sherstan 2024
+from typing import Optional, Iterator, Any, Dict
 
 import jax
 import numpy as np
 import tensorflow as tf
 from gymnasium import spaces
 from jax import Array, numpy as jnp
-
-from triangles.types import MappingArrayType
 
 
 def rng_seq(

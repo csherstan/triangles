@@ -1,3 +1,5 @@
+# Copyright Craig Sherstan 2024
+
 """
 Straightforward MLP Policy and QFunctions for continuous action space.
 Actions are all passed through a tanh activation so they are bound to [-1, 1].

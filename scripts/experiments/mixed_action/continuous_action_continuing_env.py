@@ -1,3 +1,4 @@
+# Copyright Craig Sherstan 2024
 """
 Trains an agent on MixedAction2D. However, for this version the terminate action has been removed and
 all of the discrete actions are converted to continuous actions.

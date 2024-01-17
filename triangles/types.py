@@ -1,4 +1,5 @@
-from typing import Dict, Any, Optional, Union, Callable, Protocol, Mapping, Sequence
+# Copyright Craig Sherstan 2024
+from typing import Any, Optional, Union, Callable, Protocol, Mapping
 
 import flax.struct
 import numpy as np

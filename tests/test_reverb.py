@@ -1,3 +1,4 @@
+# Copyright Craig Sherstan 2024
 import pytest
 
 from triangles.sac import (

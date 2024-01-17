@@ -1,3 +1,4 @@
+# Copyright Craig Sherstan 2024
 """
 Contains the implementation of asynchronous SAC.
 
@@ -6,15 +7,16 @@ TODO: ExpConfig has to be all jax types, otherwise it can't be passed to the jit
 """
 import argparse
 import os
-
-from triangles.util import rng_seq, as_float32, atleast_2d, space_to_reverb_spec
-from triangles.types import MappingArrayType, AlphaType, PolicyReturnType, PolicyType, MetricsType, MetricWriter, \
-    NestedNPArray, NestedArray
-
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".20"
 import tensorflow as tf
 
 tf.config.set_visible_devices([], "GPU")
+
+from triangles.types import AlphaType, PolicyReturnType, PolicyType, MetricsType, MetricWriter, \
+    NestedNPArray, NestedArray
+from triangles.util import rng_seq, as_float32, atleast_2d, space_to_reverb_spec
+
+
 
 import dataclasses
 import multiprocessing
@@ -297,8 +299,7 @@ def eval_process(
                     # try to get a new model, if we can't get one it throws an exception and we try the loop again.
                     data = model_queue.get(timeout=1)
 
-                    # TODO: move this deserialization to a function
-                    model_data = flax.serialization.msgpack_restore(bytearray(data))
+                    model_data = deserialize_model(data)
                     params = model_data["policy_params"]
                     model_clock = model_data["model_clock"]
                     LOG.info(f"Eval received {model_clock}")
@@ -440,11 +441,7 @@ def rollout_worker(
                     received = model_queue.get(timeout=0.1)
             except Empty:
                 pass
-            result = (
-                flax.serialization.msgpack_restore(bytearray(received))
-                if received is not None
-                else current
-            )
+            result = (deserialize_model(received=received) if received is not None else current)
 
             # This should probably never happen.
             if result is None:
@@ -903,6 +900,13 @@ class SACStateFactory(Protocol):
     ) -> SACModelState:
         pass
 
+def serialize_model(policy_state: PolicyTrainState, model_clock: int) -> bytes:
+        return flax.serialization.msgpack_serialize(
+            {"policy_params": policy_state.params, "model_clock": model_clock}
+        )
+
+def deserialize_model(received: Any) -> Dict[str, Any]:
+    return flax.serialization.msgpack_restore(bytearray(received))
 
 def train_loop(
     name: str,
@@ -1070,9 +1074,7 @@ def train_loop(
         :param model_clock: model clock of the model params
         :return:
         """
-        msg = flax.serialization.msgpack_serialize(
-            {"policy_params": sac_state.policy_state.params, "model_clock": model_clock}
-        )
+        msg = serialize_model(policy_state=sac_state.policy_state, model_clock=model_clock)
         for q in model_queues:
             q.put(model_clock=model_clock, obj=msg)
 
