@@ -12,7 +12,7 @@ import tensorflow as tf
 import numpy as np
 
 # do not remove, needed for MixedAction2D to be registered with gym.
-import triangles.env.mixed_action # noqa
+import triangles.env.mixed_action  # noqa
 
 
 @pytest.mark.parametrize("env_name", ["Pendulum-v1", "MixedAction2D-v0"])

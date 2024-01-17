@@ -1,5 +1,14 @@
 # Copyright Craig Sherstan 2024
-from typing import Any, Optional, Union, Callable, Protocol, Mapping, runtime_checkable, cast
+from typing import (
+    Any,
+    Optional,
+    Union,
+    Callable,
+    Protocol,
+    Mapping,
+    runtime_checkable,
+    cast,
+)
 
 import flax.struct
 import numpy as np
@@ -22,6 +31,7 @@ class PolicyReturnType(flax.struct.PyTreeNode):
 
     I'll likely use this pattern throughout.
     """
+
     sampled_actions: NestedArray  # these are actions that are stochastic, for exploration
     log_probabilities: NestedArray  # log probabilities of the sampled_actions.
     deterministic_actions: NestedArray  # deterministic actions
@@ -38,17 +48,25 @@ class PolicyType(nn.Module):
         rngs: Optional[RNGSequences] = None,
         method: Union[Callable[..., Any], str, None] = None,
         mutable: CollectionFilter = False,
-        capture_intermediates: Union[
-            bool, Callable[['nn.Module', str], bool]
-        ] = False,
+        capture_intermediates: Union[bool, Callable[["nn.Module", str], bool]] = False,
         **kwargs: Any,
     ) -> PolicyReturnType:
         """
         I'm just explicitly defining this so I can set the return type
         """
         f = super().apply
-        return cast(PolicyReturnType,
-                    super().apply(variables, *args, rngs=rngs, method=method, mutable=mutable, capture_intermediates=capture_intermediates, **kwargs))
+        return cast(
+            PolicyReturnType,
+            super().apply(
+                variables,
+                *args,
+                rngs=rngs,
+                method=method,
+                mutable=mutable,
+                capture_intermediates=capture_intermediates,
+                **kwargs,
+            ),
+        )
 
 
 class MetricWriter(Protocol):

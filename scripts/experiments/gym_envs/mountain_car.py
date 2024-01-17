@@ -9,7 +9,9 @@ from triangles.sac import ExpConfig, main, get_main_parser
 
 
 def env_factory(show: bool = False) -> gym.Env:
-    return gym.make("MountainCarContinuous-v0", render_mode="human" if show else "rgb_array")
+    return gym.make(
+        "MountainCarContinuous-v0", render_mode="human" if show else "rgb_array"
+    )
 
 
 if __name__ == "__main__":

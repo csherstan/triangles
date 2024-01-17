@@ -24,12 +24,11 @@ class Policy(PolicyType):
     """
     MLP. Action space is continuous and passed through tanh: bound to [-1, 1].
     """
+
     action_size: int
 
     @nn.compact
-    def __call__(
-        self, observations: NestedArray, rng_key: Array
-    ) -> PolicyReturnType:
+    def __call__(self, observations: NestedArray, rng_key: Array) -> PolicyReturnType:
         assert isinstance(observations, jnp.ndarray)
 
         observations = jnp.atleast_2d(observations)  # add batch dim if not present
@@ -57,8 +56,11 @@ class Policy(PolicyType):
 
         actions, action_log_prob = dist.sample_and_log_prob(seed=next(rng_gen))
 
-        return PolicyReturnType(sampled_actions=actions, log_probabilities=jnp.expand_dims(action_log_prob, -1),
-                                deterministic_actions=jnp.tanh(means))
+        return PolicyReturnType(
+            sampled_actions=actions,
+            log_probabilities=jnp.expand_dims(action_log_prob, -1),
+            deterministic_actions=jnp.tanh(means),
+        )
 
 
 class QFunction(nn.Module):
@@ -121,7 +123,9 @@ def policy_factory(env: gym.Env) -> Policy:
     return Policy(action_size=action_size)
 
 
-def sac_state_factory(config: ExpConfig, env: gym.Env, policy: PolicyType, rng_key: Array) -> SACModelState:
+def sac_state_factory(
+    config: ExpConfig, env: gym.Env, policy: PolicyType, rng_key: Array
+) -> SACModelState:
     rng_gen = rng_seq(rng_key=rng_key)
     policy_state = create_policy_state(
         env=env, policy=policy, config=config, rng_key=next(rng_gen)

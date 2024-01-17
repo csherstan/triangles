@@ -7,15 +7,22 @@ TODO: ExpConfig has to be all jax types, otherwise it can't be passed to the jit
 """
 import argparse
 import os
+
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".20"
 import tensorflow as tf
 
 tf.config.set_visible_devices([], "GPU")
 
-from triangles.types import AlphaType, PolicyReturnType, PolicyType, MetricsType, MetricWriter, \
-    NestedNPArray, NestedArray
+from triangles.types import (
+    AlphaType,
+    PolicyReturnType,
+    PolicyType,
+    MetricsType,
+    MetricWriter,
+    NestedNPArray,
+    NestedArray,
+)
 from triangles.util import rng_seq, as_float32, atleast_2d, space_to_reverb_spec
-
 
 
 import dataclasses
@@ -36,7 +43,8 @@ from typing import (
     List,
     Sequence,
     Mapping,
-    cast, )
+    cast,
+)
 
 import flax.serialization
 import flax.struct
@@ -74,11 +82,11 @@ class QueueMetricWriter(MetricWriter):
 
 
 class Batch(struct.PyTreeNode):
-    obs: PyTree # o_t
+    obs: PyTree  # o_t
     action: PyTree  # a_{t}
-    reward: jnp.ndarray # r_{t+1}
-    terminated: jnp.ndarray # t_{t+1}
-    next_obs: PyTree    # o_{t+1}
+    reward: jnp.ndarray  # r_{t+1}
+    terminated: jnp.ndarray  # t_{t+1}
+    next_obs: PyTree  # o_{t+1}
 
 
 def convert_batch(batch: ReplaySample) -> Batch:
@@ -119,13 +127,17 @@ class RWConfig:
 @flax.struct.dataclass
 class ExpConfig:
     max_replay_size: int = int(1e6)  # max size of the step reverb buffer
-    min_replay_size: int = 256 # minimum number of steps in the reverb buffer before training begins
-    num_rw_workers: int = 5  # number of rollout worker process to use for trajectory collection
-    seed: Optional[int] = None # seed for random num gen
-    q_learning_rate: float = 0.001 # learning rate used for the q-function optimizer
-    policy_learning_rate: float = 0.0001 # learning rate for the policy optimizer
-    batch_size: int = 256   # batch size to draw on each training step
-    gamma: float = 0.99 # discount value used for TD bootstrapping
+    min_replay_size: int = (
+        256  # minimum number of steps in the reverb buffer before training begins
+    )
+    num_rw_workers: int = (
+        5  # number of rollout worker process to use for trajectory collection
+    )
+    seed: Optional[int] = None  # seed for random num gen
+    q_learning_rate: float = 0.001  # learning rate used for the q-function optimizer
+    policy_learning_rate: float = 0.0001  # learning rate for the policy optimizer
+    batch_size: int = 256  # batch size to draw on each training step
+    gamma: float = 0.99  # discount value used for TD bootstrapping
     tau: float = 0.995  # soft-target update param, target = target*tau + active*(1-tau)
     init_alpha: float | Mapping[str, float] = 0.5  # weight on the entropy term
     alpha_lr: float = 3e-4  # original code base default
@@ -148,7 +160,10 @@ class PolicyTrainState(train_state.TrainState):
     """
     Overriding just I can type the apply_fn
     """
-    apply_fn: Callable[[Dict[str, VariableDict], Array, Array], PolicyReturnType] = struct.field(pytree_node=False)
+
+    apply_fn: Callable[
+        [Dict[str, VariableDict], Array, Array], PolicyReturnType
+    ] = struct.field(pytree_node=False)
 
 
 class QTrainState(train_state.TrainState):
@@ -223,7 +238,13 @@ def collect(
 
         if isinstance(action_space, spaces.Box):
             action = np.clip(as_float32(action), a_min=-1.0, a_max=1.0)[0]
-            return np.array((action * np.abs(action_space.high - action_space.low) / 2 + action_space.low + 1))
+            return np.array(
+                (
+                    action * np.abs(action_space.high - action_space.low) / 2
+                    + action_space.low
+                    + 1
+                )
+            )
 
         raise Exception
 
@@ -232,8 +253,14 @@ def collect(
     obs, _ = env.reset(seed=next(rng_gen)[0].item())
     transitions = []
     while True:
-        policy_result = policy.apply({"params": policy_params}, jnp.asarray(obs), next(rng_gen))
-        action = policy_result.deterministic_actions if exploit else policy_result.sampled_actions
+        policy_result = policy.apply(
+            {"params": policy_params}, jnp.asarray(obs), next(rng_gen)
+        )
+        action = (
+            policy_result.deterministic_actions
+            if exploit
+            else policy_result.sampled_actions
+        )
         np_action = convert_action(env.action_space, action)
         next_obs, reward, terminated, truncated, info = env.step(np_action)
         reward = float(reward)
@@ -351,7 +378,6 @@ def eval_step(
     :return: None
     """
 
-
     rng_gen = rng_seq(rng_key=rng_key)
     env = env_factory()
     policy = policy_factory(env)
@@ -441,7 +467,11 @@ def rollout_worker(
                     received = model_queue.get(timeout=0.1)
             except Empty:
                 pass
-            result = (deserialize_model(received=received) if received is not None else current)
+            result = (
+                deserialize_model(received=received)
+                if received is not None
+                else current
+            )
 
             # This should probably never happen.
             if result is None:
@@ -541,6 +571,7 @@ def write_trajectory(
                     raise e
             writer.flush()
 
+
 def calculate_alpha(alpha_params: AlphaType) -> NestedArray:
     """
     Calculates `alpha`, the weight applied to the entropy bonus.
@@ -548,6 +579,7 @@ def calculate_alpha(alpha_params: AlphaType) -> NestedArray:
     :return: Computed weights in the same structure as alpha_params[`alpha`]
     """
     return cast(NestedArray, jax.tree_map(lambda v: jnp.exp(v), alpha_params["alpha"]))
+
 
 def compute_entropy_bonus(alpha_params: AlphaType, logits: NestedArray) -> Array:
     """
@@ -562,9 +594,12 @@ def compute_entropy_bonus(alpha_params: AlphaType, logits: NestedArray) -> Array
     entropy_bonus_tree = jax.tree_map(
         lambda alpha, logits: alpha * logits, alpha_tree, logits
     )
-    return cast(Array, jax.tree_util.tree_reduce(
-        lambda accumulated, num: accumulated + num, entropy_bonus_tree
-    ))
+    return cast(
+        Array,
+        jax.tree_util.tree_reduce(
+            lambda accumulated, num: accumulated + num, entropy_bonus_tree
+        ),
+    )
 
 
 @jit
@@ -614,14 +649,20 @@ def q_function_update(
 
     # get the Q-target value estimates for \tilde{Q}(s_{t+1},a_{t+1})
     target_values_1: Array = q1_state.apply_fn(
-        {"params": q1_state.target_params}, batch.next_obs, next_state_policy_result.sampled_actions
+        {"params": q1_state.target_params},
+        batch.next_obs,
+        next_state_policy_result.sampled_actions,
     )
     target_values_2: Array = q2_state.apply_fn(
-        {"params": q2_state.target_params}, batch.next_obs, next_state_policy_result.sampled_actions
+        {"params": q2_state.target_params},
+        batch.next_obs,
+        next_state_policy_result.sampled_actions,
     )
 
     # this handles single action spaces or dictionary action spaces
-    entropy_bonus = compute_entropy_bonus(alpha_params, next_state_policy_result.log_probabilities)
+    entropy_bonus = compute_entropy_bonus(
+        alpha_params, next_state_policy_result.log_probabilities
+    )
 
     # r_{t+1} + \gamma * (1-done) * Q_min(s_{t+1}, a_{t+1}~\pi(s_{t+1}) - entropy bonus
     prediction_target = batch.reward + gamma * (1 - batch.terminated) * (
@@ -631,13 +672,15 @@ def q_function_update(
     # Note to self: by default, value_and_grad will take the derivative of the loss (first returned val) wrt the first
     # param, so the params that we want grads for need to be the first argument. This can be changed though.
     def q_loss_fn(
-        q_state_params: VariableDict,   # q function params that will get updated
-        q_state: TrainState,    # q-function state
-        prediction_target: Array,    # we want our predictor to predict the expectatin of this value.
+        q_state_params: VariableDict,  # q function params that will get updated
+        q_state: TrainState,  # q-function state
+        prediction_target: Array,  # we want our predictor to predict the expectatin of this value.
         observations: Array,  # s_t
-        actions: Array, # a_{t+1}
+        actions: Array,  # a_{t+1}
     ) -> Array:
-        predicted_q = q_state.apply_fn({"params": q_state_params}, observations, actions)
+        predicted_q = q_state.apply_fn(
+            {"params": q_state_params}, observations, actions
+        )
         return jnp.mean(jnp.square(predicted_q - prediction_target))
 
     q_grad_fn = jax.value_and_grad(q_loss_fn, has_aux=False)
@@ -695,24 +738,31 @@ def policy_update(
     :return: Tuple[new policy params, metrics]
     """
 
-
     rng_gen = rng_seq(rng_key=rng_key)
     metrics = {}
 
     def policy_loss_fn(
         policy_params: VariableDict, observations: Array, rng_key: Array
     ) -> Array:
-        policy_result = policy_state.apply_fn({"params": policy_params}, observations, rng_key)
+        policy_result = policy_state.apply_fn(
+            {"params": policy_params}, observations, rng_key
+        )
 
         # compute q values through both Q networks
-        q_1 = q1_state.apply_fn({"params": q1_state.params}, observations, policy_result.sampled_actions)
-        q_2 = q2_state.apply_fn({"params": q2_state.params}, observations, policy_result.sampled_actions)
+        q_1 = q1_state.apply_fn(
+            {"params": q1_state.params}, observations, policy_result.sampled_actions
+        )
+        q_2 = q2_state.apply_fn(
+            {"params": q2_state.params}, observations, policy_result.sampled_actions
+        )
 
         # Take the sample-wise minimum of the two predictions
         min_q = jnp.minimum(q_1, q_2)
 
         # add the entropy bonus
-        entropy_bonus = compute_entropy_bonus(alpha_params, policy_result.log_probabilities)
+        entropy_bonus = compute_entropy_bonus(
+            alpha_params, policy_result.log_probabilities
+        )
         loss = jnp.mean(entropy_bonus - min_q)
 
         return loss
@@ -723,6 +773,7 @@ def policy_update(
     metrics["loss.policy"] = policy_loss
 
     return policy_state, metrics
+
 
 @jit
 def alpha_update(
@@ -750,7 +801,6 @@ def alpha_update(
     :param rng_key: random key
     :return: Tuple[Tuple[alpha params, alpha_optimizer_params], metrics]
     """
-
 
     rng_gen = rng_seq(rng_key=rng_key)
     metrics = {}
@@ -842,7 +892,6 @@ def train_step(
     )
     metrics.update(policy_metrics)
 
-
     def compute_target_entropy(action_space: spaces.Space) -> float | NestedArray:
         """
         Heuristic used in the original paper and codebase (at least for the continuous space).
@@ -856,7 +905,7 @@ def train_step(
             return -float(action_space.n)
         elif isinstance(action_space, spaces.Dict):
             # weird typing error that I haven't resolved.
-            return {k: compute_target_entropy(v) for k, v in action_space.items()} # type: ignore
+            return {k: compute_target_entropy(v) for k, v in action_space.items()}  # type: ignore
 
         raise Exception(f"Unsupported space {type(action_space)}")
 
@@ -894,18 +943,22 @@ class SACStateFactory(Protocol):
     """
     Protocol defines the expected call signature used to generate a SACModelState object
     """
+
     def __call__(
         self, config: ExpConfig, env: gym.Env, policy: PolicyType, rng_key: Array
     ) -> SACModelState:
         pass
 
+
 def serialize_model(policy_state: PolicyTrainState, model_clock: int) -> bytes:
-        return flax.serialization.msgpack_serialize(
-            {"policy_params": policy_state.params, "model_clock": model_clock}
-        )
+    return flax.serialization.msgpack_serialize(
+        {"policy_params": policy_state.params, "model_clock": model_clock}
+    )
+
 
 def deserialize_model(received: Any) -> Dict[str, Any]:
     return cast(Dict[str, Any], flax.serialization.msgpack_restore(bytearray(received)))
+
 
 def train_loop(
     name: str,
@@ -962,7 +1015,9 @@ def train_loop(
     # ---- metric writing
     summary_writer = SummaryWriter(output_dir / "tensorboard")
 
-    def write_metrics(data: Any, model_clock: int, names: Optional[Sequence[str] | str] = None) -> None:
+    def write_metrics(
+        data: Any, model_clock: int, names: Optional[Sequence[str] | str] = None
+    ) -> None:
         """
         Write metrics. If this is a nested structure it will use recursion to flatten the name before
         writing the value.
@@ -1073,7 +1128,9 @@ def train_loop(
         :param model_clock: model clock of the model params
         :return:
         """
-        msg = serialize_model(policy_state=sac_state.policy_state, model_clock=model_clock)
+        msg = serialize_model(
+            policy_state=sac_state.policy_state, model_clock=model_clock
+        )
         for q in model_queues:
             q.put(model_clock=model_clock, obj=msg)
 
@@ -1111,8 +1168,11 @@ def train_loop(
 
     LOG.info("minimum replay buffer requirement met, begin training.")
     while True:
-        write_metrics(data=replay_client.server_info()[reverb_table_name].current_size,
-                      model_clock=int(sac_state.model_clock), names="replay_size")
+        write_metrics(
+            data=replay_client.server_info()[reverb_table_name].current_size,
+            model_clock=int(sac_state.model_clock),
+            names="replay_size",
+        )
 
         # fetch a batch and convert it to the required format for the alg
         batch = convert_batch(list(dataset.take(1))[0])
@@ -1137,7 +1197,11 @@ def train_loop(
         try:
             while True:
                 metric_data = metric_queue.get(timeout=0.1)
-                write_metrics(data=metric_data["value"], model_clock=metric_data["step"], names=metric_data["tag"])
+                write_metrics(
+                    data=metric_data["value"],
+                    model_clock=metric_data["step"],
+                    names=metric_data["tag"],
+                )
         except Empty:
             pass
 
@@ -1166,7 +1230,7 @@ def watch(
     :param config: Experiment configuration
     :param checkpoint: path the checkpoint to load, this should be the directory, NOT the checkpoint file.
     The directory will be named `checkpoint_<model_clock>` and contain a `checkpoint` file and a `_METADATA` file
-    
+
     :param env_factory: Creates the Environment
     :param policy_factory: Create the policy
     :param sac_state_factory: SAC state information

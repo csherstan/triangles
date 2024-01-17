@@ -13,6 +13,7 @@ from pygame.time import Clock
 ObsType = np.ndarray
 ActType = Dict[str, Union[np.ndarray, int, float]]
 
+
 class MixedAction2D(Env[ObsType, ActType]):
     """
     Environment mixes discrete and continuous actions.
@@ -108,7 +109,7 @@ class MixedAction2D(Env[ObsType, ActType]):
         self, action: ActType
     ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
 
-        action_value = action["value"] # the movement value
+        action_value = action["value"]  # the movement value
         terminated = False
         truncated = False
 
@@ -196,8 +197,12 @@ class MixedAction2D(Env[ObsType, ActType]):
         """
         :return: First two elements are the positional error and the final element is the distance from the target
         """
-        return np.concatenate([np.array(self.target_pos - self.current_pos, dtype=np.float32),
-                               np.array([np.linalg.norm(self.target_pos - self.current_pos)])])
+        return np.concatenate(
+            [
+                np.array(self.target_pos - self.current_pos, dtype=np.float32),
+                np.array([np.linalg.norm(self.target_pos - self.current_pos)]),
+            ]
+        )
 
 
 gym.register(
@@ -227,7 +232,9 @@ class ContinuousActionContinuingEnvWrapper(ActionWrapper[ObsType, np.ndarray, Ac
         return {"mode": mode, "value": action[1]}
 
 
-class ContinuousActionTerminatingEnvWrapper(ActionWrapper[ObsType, np.ndarray, ActType]):
+class ContinuousActionTerminatingEnvWrapper(
+    ActionWrapper[ObsType, np.ndarray, ActType]
+):
     def __init__(self, env: gym.Env):
         """
         In this setting we use a terminating environment - the agent can signal that it is finished.
