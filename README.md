@@ -12,8 +12,10 @@ with some coding practices.
 4. Choosing to implement SACv2 - or at least start there. The reason being that this has been a fundamental alg in the
 work I've been doing for the past 3 years, but I don't know it well because someone else has always 
 implemented it first.
-5. A goal here is practice, not code reuse, so I'm not trying to write libraries and sometimes I'm choosing to do
-things a harder way, just for the experience.
+5. A goal here is practice, not code reuse, so I'm not *necessarily* writing reusable or modular code. That said, in
+a number of places I have been experimenting with what the right abstraction are. For example, what is the right
+abstraction for a SAC policy in Flax? In short, there is certainly more complexity here than is necessary to just
+solve pendulum or something.
 
 ## Completed
 

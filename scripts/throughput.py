@@ -17,7 +17,7 @@ import gymnasium as gym
 import jax
 import jax.numpy as jnp
 
-from triangles.model.continuous import create_policy_state, policy_factory
+from triangles.model.continuous import create_policy_state, policy_factory, PolicyWrapper
 from triangles.sac import ExpConfig, collect
 from triangles.util import rng_seq
 
@@ -62,6 +62,7 @@ with jax.default_device(jax.devices("cpu")[0]):
     # need to recreate all the variables on the correct device
     rng_gen = rng_seq(seed=0)
     policy = policy_factory(env)
+    assert isinstance(policy, PolicyWrapper)
     policy_state = create_policy_state(
         env=env, policy=policy, config=config, rng_key=next(rng_gen)
     )
@@ -71,7 +72,7 @@ with jax.default_device(jax.devices("cpu")[0]):
     # Call the policy repeatedly and measure the total time taken
     start_time = time.time()
     for i in range(num_steps):
-        policy.apply({"params": policy_state.params}, obs, next(rng_gen))
+        policy({"params": policy_state.params}, obs, next(rng_gen))
     delta_time = time.time() - start_time
     print(
         f"CPU apply {num_steps / delta_time} steps/s, {delta_time / num_steps} s/step"
@@ -84,6 +85,7 @@ with jax.default_device(jax.devices("gpu")[0]):
     # need to recreate all the variables on the correct device
     rng_gen = rng_seq(seed=0)
     policy = policy_factory(env)
+    assert isinstance(policy, PolicyWrapper)
     policy_state = create_policy_state(
         env=env, policy=policy, config=config, rng_key=next(rng_gen)
     )
@@ -93,7 +95,7 @@ with jax.default_device(jax.devices("gpu")[0]):
     # Call the policy repeatedly and measure the total time taken
     start_time = time.time()
     for i in range(num_steps):
-        policy.apply({"params": policy_state.params}, obs, next(rng_gen))
+        policy({"params": policy_state.params}, obs, next(rng_gen))
     delta_time = time.time() - start_time
     print(
         f"GPU apply {num_steps / delta_time} steps/s, {delta_time / num_steps} s/step"

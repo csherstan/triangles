@@ -37,37 +37,20 @@ class PolicyReturnType(flax.struct.PyTreeNode):
     deterministic_actions: NestedArray  # deterministic actions
 
 
-class PolicyType(nn.Module):
-    def __call__(self, observations: NestedArray, rng_key: Array) -> PolicyReturnType:
+class PolicyType(Protocol):
+    """
+    I've been asked why I would want PolicyType, it seems to add an unnecessary level of complication.
+
+    Agreed. As it is right now, particularly with such a small codebase and only a single policy/model type this
+    seems like overkill.
+
+    The main idea here is that in the future I would have different kinds of models/policies and I want to have a
+    protocol that defines how we interact with a policy in a consistent way.
+
+    The nicest/most useful way to do this is something I'm still experimenting with. I'm not committed to this pattern.
+    """
+    def __call__(self, variables: VariableDict, observations: NestedArray, rng_key: Array) -> PolicyReturnType:
         raise NotImplementedError
-
-    def apply(
-        self,
-        variables: VariableDict,
-        *args: Any,
-        rngs: Optional[RNGSequences] = None,
-        method: Union[Callable[..., Any], str, None] = None,
-        mutable: CollectionFilter = False,
-        capture_intermediates: Union[bool, Callable[["nn.Module", str], bool]] = False,
-        **kwargs: Any,
-    ) -> PolicyReturnType:
-        """
-        I'm just explicitly defining this so I can set the return type
-        """
-        f = super().apply
-        return cast(
-            PolicyReturnType,
-            super().apply(
-                variables,
-                *args,
-                rngs=rngs,
-                method=method,
-                mutable=mutable,
-                capture_intermediates=capture_intermediates,
-                **kwargs,
-            ),
-        )
-
 
 class MetricWriter(Protocol):
     """

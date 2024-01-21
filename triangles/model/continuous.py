@@ -10,8 +10,10 @@ from typing import cast
 
 import distrax
 import gymnasium as gym
+import jax.random
 import optax
 from flax import linen as nn
+from flax.core.scope import VariableDict
 from jax import Array, numpy as jnp
 from gymnasium import spaces
 
@@ -20,7 +22,7 @@ from triangles.types import PolicyReturnType, PolicyType, NestedArray
 from triangles.util import rng_seq
 
 
-class Policy(PolicyType):
+class Policy(nn.Module):
     """
     MLP. Action space is continuous and passed through tanh: bound to [-1, 1].
     """
@@ -63,6 +65,18 @@ class Policy(PolicyType):
         )
 
 
+class PolicyWrapper(PolicyType):
+
+    def __init__(self, policy: nn.Module):
+        self.policy = policy
+
+    def __call__(self, variables: VariableDict, observations: NestedArray, rng_key: Array) -> PolicyReturnType:
+        return cast(PolicyReturnType,
+                    self.policy.apply(variables={"params": variables["params"]},
+                                      observations=observations,
+                                      rng_key=jax.random.split(rng_key)[0]))
+
+
 class QFunction(nn.Module):
     @nn.compact
     def __call__(self, states: Array, actions: Array) -> Array:
@@ -77,15 +91,15 @@ class QFunction(nn.Module):
 
 
 def create_policy_state(
-    env: gym.Env, policy: PolicyType, config: ExpConfig, rng_key: Array
+    env: gym.Env, policy: PolicyWrapper, config: ExpConfig, rng_key: Array
 ) -> PolicyTrainState:
     rng_gen = rng_seq(rng_key=rng_key)
     init_samples = [env.observation_space.sample(), env.observation_space.sample()]
-    output, policy_variables = policy.init_with_output(
+    output, policy_variables = policy.policy.init_with_output(
         next(rng_gen), jnp.array(init_samples), next(rng_gen)
     )
     policy_state: PolicyTrainState = PolicyTrainState.create(
-        apply_fn=policy.apply,
+        apply_fn=policy.policy.apply,
         params=policy_variables["params"],
         tx=optax.adam(
             learning_rate=config.policy_learning_rate,
@@ -117,16 +131,17 @@ def create_q_state(env: gym.Env, config: ExpConfig, rng_key: Array) -> QTrainSta
     return q_state
 
 
-def policy_factory(env: gym.Env) -> Policy:
+def policy_factory(env: gym.Env) -> PolicyType:
     assert isinstance(env.action_space, spaces.Box)
     action_size = env.action_space.shape[0]
-    return Policy(action_size=action_size)
+    return PolicyWrapper(Policy(action_size=action_size))
 
 
 def sac_state_factory(
     config: ExpConfig, env: gym.Env, policy: PolicyType, rng_key: Array
 ) -> SACModelState:
     rng_gen = rng_seq(rng_key=rng_key)
+    assert isinstance(policy, PolicyWrapper)
     policy_state = create_policy_state(
         env=env, policy=policy, config=config, rng_key=next(rng_gen)
     )

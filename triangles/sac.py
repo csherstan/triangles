@@ -68,7 +68,6 @@ import tensorflow as tf
 
 LOG = structlog.getLogger()
 
-
 class QueueMetricWriter(MetricWriter):
     """
     A metric writer that uses a multiprocessing Queue for passing data.
@@ -161,9 +160,7 @@ class PolicyTrainState(train_state.TrainState):
     Overriding just I can type the apply_fn
     """
 
-    apply_fn: Callable[
-        [Dict[str, VariableDict], Array, Array], PolicyReturnType
-    ] = struct.field(pytree_node=False)
+    apply_fn: PolicyType = struct.field(pytree_node=False)
 
 
 class QTrainState(train_state.TrainState):
@@ -253,7 +250,7 @@ def collect(
     obs, _ = env.reset(seed=next(rng_gen)[0].item())
     transitions = []
     while True:
-        policy_result = policy.apply(
+        policy_result = policy(
             {"params": policy_params}, jnp.asarray(obs), next(rng_gen)
         )
         action = (
@@ -586,13 +583,14 @@ def compute_entropy_bonus(alpha_params: AlphaType, logits: NestedArray) -> Array
     Compute the entropy bonus.
     :param alpha_params: the weight applied to the entropy bonus, this can be a PyTree.
     :param logits: log probability. structure must match alpha unless alpha is a float Also a PyTree
-    :return: The summation of the entropy bonus.
+    :return: The summation of the entropy bonus. NOTE: to treat this as a bonus, the negative is applied here.
+    The greater the entropy the more positive this value will be.
     """
 
     alpha_tree = calculate_alpha(alpha_params)
 
     entropy_bonus_tree = jax.tree_map(
-        lambda alpha, logits: alpha * logits, alpha_tree, logits
+        lambda alpha, logits: -alpha * logits, alpha_tree, logits
     )
     return cast(
         Array,
@@ -618,14 +616,12 @@ def q_function_update(
     Qfunction update:
 
     Uses TD 1-step target, where the bootstrap value is the min \tilde{Q}(s_{t+1}, a_{t+1}) between the 2
-    different TARGET \tilde{Q} function.
+    different TARGET \tilde{Q} functions.
 
-    \delta_t = r_t + \gamma (1-done) \tilde{Q_min}(s_{t+1}, \pi(s_{t+1}) - Q(s_t, a_t).
-    Here: a_t, s_t, s_{t+1} all come from the batch data, but the action used in the Q-target is sampled from
+    \delta_t = r_t + \gamma (1-done) \tilde{Q}_min(s_{t+1}, \pi(s_{t+1})) - Q(s_t, a_t).
+    Additionally, the entropy bonus is added. The entropy bonus is: -log pi(a_{t+1}|s_{t+1}).
+    Here: a_t, s_t, s_{t+1} all come from the batch data, but the action, a_{t+1} in the Q-target is sampled from
     the policy (outside the differentiation).
-
-    Additionally, the entropy bonus is added. The entropy bonus is: -log pi(a_{t+1}|s_{t+1})
-
 
     :param batch: transitions batch data
     :param gamma: bootstrap value [0, 1)
@@ -666,7 +662,7 @@ def q_function_update(
 
     # r_{t+1} + \gamma * (1-done) * Q_min(s_{t+1}, a_{t+1}~\pi(s_{t+1}) - entropy bonus
     prediction_target = batch.reward + gamma * (1 - batch.terminated) * (
-        jnp.minimum(target_values_1, target_values_2) - entropy_bonus
+        jnp.minimum(target_values_1, target_values_2) + entropy_bonus
     )
 
     # Note to self: by default, value_and_grad will take the derivative of the loss (first returned val) wrt the first
@@ -763,7 +759,7 @@ def policy_update(
         entropy_bonus = compute_entropy_bonus(
             alpha_params, policy_result.log_probabilities
         )
-        loss = jnp.mean(entropy_bonus - min_q)
+        loss = -jnp.mean(entropy_bonus + min_q)
 
         return loss
 
@@ -788,7 +784,7 @@ def alpha_update(
     """
     Update the alpha parameter: the weight on the entropy bonus.
 
-    Loss: -\alpha E[log_prob(s,a) + target_entropy]. So the result is the when the entropy is higher than the target
+    Loss: -\alpha E[log_prob(s,a) + target_entropy]. So the result is that when the entropy is higher than the target
     (log_prob is < target_entropy) then we reduce alpha, and when the entropy is lower than the target (our policy
     is collapsing: log_prob < target_entropy) then we increase alpha
 
