@@ -117,7 +117,9 @@ class TriangleEnv(Env[ActType, ObsType]):
         Action space:
          - A dictionary
           - 'data': Dict.
-            - 'edit': 'index': int, 'delta': delta on the selected triangle
+            - 'edit':
+                - 'index': int,
+                - 'delta': change on the selected triangle
             - 'add': 'triangle': the triangle array
           - 'op': The operation to perform, string, one of 'stop', 'add', 'edit'.
 
