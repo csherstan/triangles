@@ -17,6 +17,7 @@ class Point:
     x: float
     y: float
 
+TRIANGLE_SIZE = 10
 
 @dataclasses.dataclass(frozen=True)
 class Triangle:
