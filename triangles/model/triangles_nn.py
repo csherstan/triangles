@@ -156,10 +156,18 @@ class QFunction(nnx.Module):
         self.q_function = MLP(in_features=in_features + TRIANGLE_SIZE, features=[128, 128, 1], activations=[nnx.selu, nnx.selu, None],
                               rngs=rngs)
 
+    @nn.compact
     def __call__(self, core_output: Array, actions: DictArrayType) -> Array:
         triangle_action = actions["data"]["triangle"]
         features = jnp.concatenate([core_output, triangle_action], axis=1)
-        return self.q_function(features)
+
+        return nn.Sequential([
+            nn.Dense(features=128),
+            nn.selu,
+            nn.Dense(features=128),
+            nn.selu,
+            nn.Dense(features=1)
+        ])(features)
 
 
 class Policy(nnx.Module):
@@ -171,9 +179,16 @@ class Policy(nnx.Module):
         self.log_std_head = nnx.Linear(in_features=128, out_features=TRIANGLE_SIZE, rngs=rngs)
 
     def __call__(self, core_output: Array) -> Tuple[Array, Array, Array]:
-        neck_output = self.neck(core_output)
-        means = self.mean_head(neck_output)
-        log_std_dev = self.log_std_head(neck_output)
+
+        neck_output = nn.Sequential([
+            nn.Dense(features=128),
+            nn.selu,
+            nn.Dense(features=128),
+            nn.selu,
+        ])(core_output)
+
+        means = nn.Dense(features=TRIANGLE_SIZE)(neck_output)
+        log_std_dev = nn.Dense(features=TRIANGLE_SIZE)(neck_output)
         std_dev = jnp.exp(log_std_dev)
 
         norm = distrax.MultivariateNormalDiag(loc=means, scale_diag=std_dev)
