@@ -1,3 +1,4 @@
+from functools import partial
 from typing import List, Tuple
 
 import distrax
@@ -14,20 +15,40 @@ class CNN(nn.Module):
 
     @nn.compact
     def __call__(self, images: Array) -> Array:
+
         x = nn.Sequential([
-            nn.Conv(features=64, kernel_sizes=(4, 4), strides=(2, 2), paddings="SAME", use_biases=False),
-            nn.leaky_relu,
-            nn.Conv(features=128, kernel_sizes=(4, 4), strides=(2, 2), paddings="SAME", use_biases=False),
-            nn.leaky_relu,
-            nn.Conv(features=256, kernel_sizes=(4, 4), strides=(2, 2), paddings="SAME", use_biases=False),
-            nn.leaky_relu,
-            nn.Conv(features=512, kernel_sizes=(4, 4), strides=(2, 2), paddings="SAME", use_biases=False),
-            nn.leaky_relu,
-            nn.Conv(features=1, kernel_sizes=(4, 4), strides=(1, 1), paddings="VALID", use_biases=False),
-            nn.leaky_relu,
+            nn.Conv(features=32, kernel_size=(3, 3), strides=(1,1), use_bias=False),
+            nn.relu,
+            partial(nn.avg_pool, window_shape=(2,2), strides=(2,2)),
+            nn.Conv(features=64, kernel_size=(3, 3), strides=(1, 1), use_bias=False),
+            nn.relu,
+            partial(nn.avg_pool, window_shape=(2, 2), strides=(2, 2)),
         ])(images)
 
+        x = x.reshape(x.shape[0], -1)
+        x = nn.Sequential([
+            nn.relu,
+            nn.Dense(10)
+        ])(x)
+
         return x
+
+
+
+
+        # x = nn.Sequential([
+        #     nn.Conv(features=64, kernel_size=(4, 4), strides=(2, 2), padding="SAME", use_bias=False),
+        #     nn.leaky_relu,
+        #     nn.Conv(features=128, kernel_size=(4, 4), strides=(2, 2), padding="SAME", use_bias=False),
+        #     nn.leaky_relu,
+        #     nn.Conv(features=256, kernel_size=(4, 4), strides=(2, 2), padding="SAME", use_bias=False),
+        #     nn.leaky_relu,
+        #     nn.Conv(features=512, kernel_size=(4, 4), strides=(2, 2), padding="SAME", use_bias=False),
+        #     nn.leaky_relu,
+        #     nn.Conv(features=1, kernel_size=(4, 4), strides=(1, 1), padding="VALID", use_bias=False),
+        #     nn.leaky_relu,
+        # ])(images)
+
 
 
 class Encoder(nn.Module):
@@ -57,6 +78,7 @@ class Core(nn.Module):
     qkv_features: int = 24
     max_triangles: int = 20
     embedding_size: int = 16
+    query_size: int = 21
 
     @property
     def out_features(self) -> int:
@@ -130,14 +152,12 @@ class Core(nn.Module):
         mask.at[:, :, :, -len(triangles_obs)].set(False)
         mask.at[:, :, -len(triangles_obs), :].set(False)
 
-        outputs = self.attention_blocks(inputs_q=tokens, mask=mask)
-
-        nn.Sequential([
+        outputs = nn.Sequential([
             nn.MultiHeadAttention(num_heads=self.num_heads, qkv_features=self.qkv_features),
             nn.MultiHeadAttention(num_heads=self.num_heads, qkv_features=self.qkv_features),
             nn.MultiHeadAttention(num_heads=self.num_heads, qkv_features=self.qkv_features),
             nn.MultiHeadAttention(num_heads=self.num_heads, qkv_features=self.qkv_features),
-        ])
+        ])(inputs_q=tokens, mask=mask)
 
         # flatten
         outputs = jnp.reshape(outputs, (-1, self.out_features))
@@ -200,13 +220,13 @@ if __name__ == "__main__":
     action = jax.tree_map(lambda x: jnp.expand_dims(x, 0), action)
 
     core = Core()
-    core_output, core_variables = core.init_with_output(init_obs)
+    core_output, core_variables = core.init_with_output(jax.random.PRNGKey(0), init_obs)
     q_function = QFunction(in_features=core.out_features)
 
-    q_output, q_variables = q_function.init_with_output(core_output, action)
+    q_output, q_variables = q_function.init_with_output(jax.random.PRNGKey(0), core_output, action)
 
     policy = Policy()
-    policy_output, policy_variables = policy.init_with_output(core_output)
+    policy_output, policy_variables = policy.init_with_output(jax.random.PRNGKey(0), core_output)
 
 
     pass
