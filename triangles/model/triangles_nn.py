@@ -1,19 +1,14 @@
-from functools import partial
 from typing import List, Tuple
 
 import distrax
-from flax import nnx
 import flax.linen as nn
 import jax.random
 from jax import Array
 import jax.numpy as jnp
+import gymnasium as gym
 
 from triangles.common import DictArrayType
 from triangles.env.triangle import TriangleEnv, TRIANGLE_SIZE
-
-
-# from triangles.common import DictArrayType
-
 
 class CNN(nn.Module):
 
@@ -150,11 +145,7 @@ class Core(nn.Module):
         return outputs
 
 
-class QFunction(nnx.Module):
-
-    def __init__(self, in_features: int, *, rngs: nnx.Rngs):
-        self.q_function = MLP(in_features=in_features + TRIANGLE_SIZE, features=[128, 128, 1], activations=[nnx.selu, nnx.selu, None],
-                              rngs=rngs)
+class QFunction(nn.Module):
 
     @nn.compact
     def __call__(self, core_output: Array, actions: DictArrayType) -> Array:
@@ -170,13 +161,7 @@ class QFunction(nnx.Module):
         ])(features)
 
 
-class Policy(nnx.Module):
-
-    def __init__(self, in_features: int, *, rngs: nnx.Rngs):
-        self.rngs = rngs
-        self.neck = MLP(in_features=in_features, features=[128, 128], activations=[nnx.selu, nnx.selu], rngs=rngs)
-        self.mean_head = nnx.Linear(in_features=128, out_features=TRIANGLE_SIZE, rngs=rngs)
-        self.log_std_head = nnx.Linear(in_features=128, out_features=TRIANGLE_SIZE, rngs=rngs)
+class Policy(nn.Module):
 
     def __call__(self, core_output: Array) -> Tuple[Array, Array, Array]:
 
@@ -211,21 +196,27 @@ if __name__ == "__main__":
     init_obs, _ = env.reset(options={"target": image})
     action = env.action_space.sample()
 
-    rngs = nnx.Rngs(0)
-
-    core = Core(rngs=rngs)
-    q_function = QFunction(in_features=core.out_features, rngs=rngs)
-    nnx.display(q_function)
-
     init_obs = jax.tree_map(lambda x: jnp.expand_dims(x, 0), init_obs)
     action = jax.tree_map(lambda x: jnp.expand_dims(x, 0), action)
 
-    core_output = core(init_obs)
+    core = Core()
+    core_output, core_variables = core.init_with_output(init_obs)
+    q_function = QFunction(in_features=core.out_features)
 
-    q = q_function(core_output=core_output, actions=action)
-    print(q)
+    q_output, q_variables = q_function.init_with_output(core_output, action)
 
-    policy = Policy(in_features=core.out_features, rngs=rngs)
-    p, log_p, mean = policy(core_output=core_output)
+    policy = Policy()
+    policy_output, policy_variables = policy.init_with_output(core_output)
 
-    print(p, log_p, mean)
+
+    pass
+    #
+    # core_output = core(init_obs)
+    #
+    # q = q_function(core_output=core_output, actions=action)
+    # print(q)
+    #
+    # policy = Policy(in_features=core.out_features, rngs=rngs)
+    # p, log_p, mean = policy(core_output=core_output)
+    #
+    # print(p, log_p, mean)
