@@ -9,7 +9,7 @@ readme = "README.md"
 python = ">=3.10,<3.11"
 pillow = "^10.1.0"
 swig = "^4.1.1.post1"
-gymnasium = {extras = ["classic-control"], version = "^0.28.1"}
+gymnasium = {extras = ["classic-control", "mujoco"], version = "^0.28.1"}
 flax = "^0.7.5"
 structlog = "^23.2.0"
 distrax = "^0.1.5"
