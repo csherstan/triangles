@@ -18,7 +18,7 @@ from triangles.common import (
     QTrainState,
     stack_dict_jnp,
     convert_space_to_jnp,
-    SACModelState, atleast_2d,
+    atleast_2d, ModelState,
 )
 
 
@@ -157,7 +157,7 @@ def create_q_state(env: gym.Env, config: ExpConfig, rng_key: Array) -> QTrainSta
 
 def sac_state_factory(
     config: ExpConfig, env: gym.Env, policy: PolicyType, rng_key: Array
-) -> SACModelState:
+) -> ModelState:
     rng_gen = rng_seq(rng_key=rng_key)
     policy_state = create_policy_state(
         env=env, policy=policy, config=config, rng_key=next(rng_gen)
@@ -170,7 +170,7 @@ def sac_state_factory(
         "alpha": jax.tree_map(lambda alpha: jnp.array([alpha]), config.init_alpha)
     }
 
-    return SACModelState(
+    return ModelState(
         policy_state=policy_state,
         q1_state=q1_state,
         q2_state=q2_state,

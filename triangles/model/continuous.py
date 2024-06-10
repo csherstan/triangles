@@ -8,7 +8,8 @@ from flax.training.train_state import TrainState
 from jax import Array, numpy as jnp
 from gymnasium import spaces
 
-from triangles.common import rng_seq, ExpConfig, QTrainState, SACModelState, PolicyType
+from triangles.common import rng_seq, ExpConfig, QTrainState, PolicyType, ModelState
+from triangles.sac import SACModelState
 
 
 class Policy(nn.Module):
@@ -112,7 +113,7 @@ def policy_factory(env: gym.Env) -> Policy:
 
 def sac_state_factory(
     config: ExpConfig, env: gym.Env, policy: PolicyType, rng_key: Array
-) -> SACModelState:
+) -> ModelState:
     rng_gen = rng_seq(rng_key=rng_key)
     policy_state = create_policy_state(
         env=env, policy=policy, config=config, rng_key=next(rng_gen)

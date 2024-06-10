@@ -40,5 +40,5 @@ if __name__ == "__main__":
         args=args,
         env_factory=env_factory,
         policy_factory=policy_factory,
-        sac_state_factory=sac_state_factory,
+        state_factory=sac_state_factory,
     )

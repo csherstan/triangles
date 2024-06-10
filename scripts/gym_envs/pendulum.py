@@ -6,6 +6,7 @@ import gymnasium as gym
 
 from triangles.model.continuous import policy_factory, sac_state_factory
 from triangles.common import ExpConfig, main
+from triangles.sac import train_step
 
 
 def env_factory(name: str, show: bool = False) -> gym.Env:
@@ -26,5 +27,6 @@ if __name__ == "__main__":
         args,
         partial(env_factory, name="Pendulum-v1"),
         policy_factory=policy_factory,
-        sac_state_factory=sac_state_factory,
+        state_factory=sac_state_factory,
+        train_step=train_step,
     )

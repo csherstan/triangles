@@ -4,12 +4,11 @@ import triangles.env.mixed_action
 import gymnasium as gym
 
 from triangles.common import (
-    train_step,
     PolicyFactory,
     ExpConfig,
-    SACStateFactory,
     Batch,
 )
+from triangles.sac import train_step, SACStateFactory
 from triangles.model import continuous, mixed_action
 import jax.numpy as jnp
 

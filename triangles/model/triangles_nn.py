@@ -8,7 +8,7 @@ from jax import Array
 import jax.numpy as jnp
 import gymnasium as gym
 
-from triangles.common import DictArrayType
+from triangles.common import DictArrayType, rng_seq
 from triangles.env.triangle import TriangleEnv, TRIANGLE_SIZE
 
 class CNN(nn.Module):
@@ -165,7 +165,7 @@ class Core(nn.Module):
         return outputs
 
 
-class QFunction(nn.Module):
+class QHead(nn.Module):
 
     @nn.compact
     def __call__(self, core_output: Array, actions: DictArrayType) -> Array:
@@ -181,9 +181,11 @@ class QFunction(nn.Module):
         ])(features)
 
 
-class Policy(nn.Module):
+class PolicyHead(nn.Module):
 
-    def __call__(self, core_output: Array) -> Tuple[Array, Array, Array]:
+    @nn.compact
+    def __call__(self, core_output: Array, rng_key: Array) -> Tuple[Array, Array, Array]:
+        rng_gen = rng_seq(rng_key=rng_key)
 
         neck_output = nn.Sequential([
             nn.Dense(features=128),
@@ -201,9 +203,25 @@ class Policy(nn.Module):
             distribution=norm, bijector=distrax.Block(distrax.Tanh(), ndims=1)
         )
 
-        actions, action_log_prob = dist.sample_and_log_prob(seed=self.rngs())
+        actions, action_log_prob = dist.sample_and_log_prob(seed=next(rng_gen))
 
         return actions, jnp.expand_dims(action_log_prob, -1), jnp.tanh(means)
+
+
+class Policy(nn.Module):
+
+    @nn.compact
+    def __call__(self, observations: DictArrayType, rng_key: Array) -> Tuple[Array, Array, Array]:
+        core_output = Core()(observations)
+        return PolicyHead()(core_output, rng_key)
+
+class QFunction(nn.Module):
+
+    @nn.compact
+    def __call__(self, observations: DictArrayType, actions: DictArrayType) -> Array:
+        core_output = Core()(observations)
+        return QHead()(core_output, actions)
+
 
 
 if __name__ == "__main__":
@@ -221,12 +239,12 @@ if __name__ == "__main__":
 
     core = Core()
     core_output, core_variables = core.init_with_output(jax.random.PRNGKey(0), init_obs)
-    q_function = QFunction(in_features=core.out_features)
+    q_function = QHead()
 
     q_output, q_variables = q_function.init_with_output(jax.random.PRNGKey(0), core_output, action)
 
-    policy = Policy()
-    policy_output, policy_variables = policy.init_with_output(jax.random.PRNGKey(0), core_output)
+    policy = PolicyHead()
+    policy_output, policy_variables = policy.init_with_output(jax.random.PRNGKey(0), core_output, jax.random.PRNGKey(0))
 
 
     pass
