@@ -5,7 +5,7 @@ import optax
 from jax import Array
 import jax.numpy as jnp
 
-from triangles.env.triangle import AddOnlyTriangleEnvWrapper
+from triangles.env.triangle_v1 import AddOnlyTriangleEnvWrapper
 from triangles.model.triangles_nn import PolicyHead, Core, QHead
 
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".20"

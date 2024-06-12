@@ -1,5 +1,5 @@
 from triangles.common import collect
-from triangles.env.triangle import AddOnlyTriangleEnvWrapper
+from triangles.env.triangle_v1 import AddOnlyTriangleEnvWrapper
 from triangles.model.triangles_nn import Policy
 import gymnasium as gym
 import jax
@@ -11,13 +11,12 @@ if __name__=="__main__":
     height = 600
 
     env = gym.make(
-        "triangles-v0",
+        "triangles-v1",
         width=width,
         height=height,
         # render_mode="rgb_array",
         # continuous=True,
     )
-    env = AddOnlyTriangleEnvWrapper(env)
 
     width = 300
     height = 600

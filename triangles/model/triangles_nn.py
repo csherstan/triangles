@@ -13,6 +13,8 @@ from triangles.env.triangle import TriangleEnv, TRIANGLE_SIZE
 
 class CNN(nn.Module):
 
+    # TODO: https://github.com/matthias-wright/flaxmodels/tree/main
+
     @nn.compact
     def __call__(self, images: Array) -> Array:
 

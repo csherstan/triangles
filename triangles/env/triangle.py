@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 import gymnasium as gym
 from gymnasium import Env
-from gymnasium.core import spaces, RenderFrame, ActionWrapper, WrapperActType, ObservationWrapper, WrapperObsType
+from gymnasium.core import spaces
 
 ActType = Dict[str, Any]
 ObsType = Dict[str, Any]
@@ -261,51 +261,6 @@ def render_triangles(triangles: List[Triangle], width: int, height: int) -> np.n
     del draw
 
     return np.array(image)
-
-
-class AddOnlyTriangleEnvWrapper(ActionWrapper[ObsType, np.ndarray, ActType], ObservationWrapper):
-
-    """
-    I find it interesting how much the existing code base is impacting how I try to solve this problem.
-    I'm limiting my solutions to what allows me to reuse code as much as possible.
-    This might end up being a bad decision.
-
-    I certainly see how much existing infrastructure can become a hindrance to rapid development.
-    """
-
-    def __init__(self, env: Env, max_triangles: int = 20):
-        super().__init__(env)
-        self.max_triangles = max_triangles
-
-        self.action_space = spaces.Box(low=0, high=1, shape=(10,))
-        self.observation_space = spaces.Dict(
-            {
-                "error": spaces.Box(low=-1, high=1, shape=(self.width, self.height)),
-                "triangles": spaces.Box(low=-1, high=1, shape=(self.max_triangles, 10)),
-            }
-        )
-
-        self.triangles = np.array((self.max_triangles, 10))
-
-    def reset(
-        self, *, seed: int | None = None, options: dict[str, Any] | None = None
-    ) -> tuple[WrapperObsType, dict[str, Any]]:
-
-        obs, info = super().reset(seed=seed, options=options)
-        return obs, info
-
-
-    def action(self, action: WrapperActType) -> ActType:
-        return {
-            "data": {
-                "index": 0,
-                "triangle": action
-            },
-            "op": TriangleEnv.Op.ADD
-        }
-
-    def observation(self, observation: ObsType) -> WrapperObsType:
-
 
 if __name__ == "__main__":
 
