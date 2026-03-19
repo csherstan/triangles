@@ -1,7 +1,7 @@
 import dataclasses
 from enum import Enum
 from functools import partial
-from typing import SupportsFloat, Any, List, Dict, Tuple, cast
+from typing import SupportsFloat, Any, List, Dict, Tuple, cast, Callable
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -18,7 +18,9 @@ class Point:
     x: float
     y: float
 
+
 TRIANGLE_SIZE = 10
+
 
 @dataclasses.dataclass(frozen=True)
 class Triangle:
@@ -67,12 +69,14 @@ class TriangleEnv(Env[ActType, ObsType]):
         ADD = 2
 
     def __init__(
-        self, width: int, height: int, add_cost: float = -1.0, edit_cost: float = -1.0
+        self, width: int, height: int, add_cost: float = -1.0, edit_cost: float = -1.0, step_cost: float = -1.0,
+        target_generator: Callable[[None], np.ndarray] = None
     ):
         super().__init__()
 
         self.add_cost = add_cost
         self.edit_cost = edit_cost
+        self.step_cost = step_cost
 
         # I'd really like to be able to have variable size images, not sure how to handle that using spaces
         self.width = width
@@ -81,10 +85,12 @@ class TriangleEnv(Env[ActType, ObsType]):
         self.energy = 0.0
         self.max_alpha = 0.1
 
-        self.target_generator = lambda : np.zeros((self.height, self.width, 3), dtype=np.float32)
+        self.target_generator = target_generator or (
+            lambda: np.zeros((self.height, self.width, 3), dtype=np.float32)
+        )
 
         # a triangle is defined by 3 vertices (x,y), alpha, color (rgb)
-        triangle_space = spaces.Box(low=0, high=1, shape=(10,))
+        triangle_space = spaces.Box(low=-1, high=1, shape=(10,))
 
         self.observation_space = spaces.Dict(
             {
@@ -165,9 +171,9 @@ class TriangleEnv(Env[ActType, ObsType]):
         )
 
         # rendered and target_image are in pixel space
-        reward_components["reconstruction"] = np.square(
-            self.target_image - rendered
-        ).sum() / (rendered.shape[0] * rendered.shape[1])
+        reward_components["reconstruction"] = -np.square(
+            (self.target_image - rendered) / 255.
+        ).mean()
 
         self.rendered = rendered
 
@@ -176,7 +182,9 @@ class TriangleEnv(Env[ActType, ObsType]):
         if self.energy <= 0.0:
             terminated = True
 
-        reward = -1.  # a constant step penalty
+        reward_components["step"] = self.step_cost
+
+        reward = 0.0
         for v in reward_components.values():
             reward += v
 
@@ -196,7 +204,7 @@ class TriangleEnv(Env[ActType, ObsType]):
     ) -> tuple[ObsType, dict[str, Any]]:
         super().reset(seed=seed, options=options)
 
-        self.target_image = options["target"]  if options else self.target_generator()
+        self.target_image = options["target"] if options else self.target_generator()
 
         # for now we'll start with a fixed amount of energy
         self.energy = 10.0
@@ -214,7 +222,7 @@ class TriangleEnv(Env[ActType, ObsType]):
         obs = self._get_obs()
         return obs, {}
 
-    def render(self) -> np.ndarray: # type: ignore
+    def render(self) -> np.ndarray:  # type: ignore
         return render_triangles(self.triangles, width=self.width, height=self.height)
 
     def _get_obs(self) -> Dict[str, Any]:
@@ -226,6 +234,7 @@ class TriangleEnv(Env[ActType, ObsType]):
         diff = self.target_image - self.rendered
 
         return {"error": diff, "triangles": self.triangles, "energy": self.energy}
+
 
 gym.register("triangles-v0", entry_point="triangles.env.triangle:TriangleEnv",
              nondeterministic=False,
@@ -239,8 +248,8 @@ def render_triangles(triangles: List[Triangle], width: int, height: int) -> np.n
 
     def scale_int(value: float, max_int: int) -> int:
         # while the call ends up being just as complicated, this way I make sure every call is consistent
-        assert value <= 1.0
-        return int(value * max_int)
+        assert -1.0 <= value <= 1.0
+        return int(max_int * (value + 1) / 2)
 
     scale_rgba = partial(scale_int, max_int=255)
 
@@ -261,6 +270,7 @@ def render_triangles(triangles: List[Triangle], width: int, height: int) -> np.n
     del draw
 
     return np.array(image)
+
 
 if __name__ == "__main__":
 

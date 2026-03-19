@@ -21,7 +21,7 @@ class AddOnlyTriangleEnvWrapper(TriangleEnv):
     """
 
     def __init__(self, width: int, height: int, max_triangles: int = 20):
-        super().__init__(width=width, height=height)
+        super().__init__(width=width, height=height, add_cost=0.0, step_cost=0.0)
         self.max_triangles = max_triangles  # really this has the same effect as max_episode_steps
 
         self.action_space = spaces.Box(low=0, high=1, shape=(10,))

@@ -1,9 +1,13 @@
+from PIL import Image
+
 from triangles.common import collect
-from triangles.env.triangle_v1 import AddOnlyTriangleEnvWrapper
 from triangles.model.triangles_nn import Policy
 import gymnasium as gym
 import jax
 import jax.numpy as jnp
+import numpy as np
+
+import datasets
 
 if __name__=="__main__":
 
@@ -14,8 +18,6 @@ if __name__=="__main__":
         "triangles-v1",
         width=width,
         height=height,
-        # render_mode="rgb_array",
-        # continuous=True,
     )
 
     width = 300
@@ -29,4 +31,7 @@ if __name__=="__main__":
 
     policy = Policy()
     policy_output, policy_variables = policy.init_with_output(jax.random.PRNGKey(0), init_obs, jax.random.PRNGKey(0))
-    collect(env, policy, policy_params=policy_variables["params"], rng_key=jax.random.PRNGKey(0))
+    the_return, transitions = collect(env, policy, policy_params=policy_variables["params"], rng_key=jax.random.PRNGKey(0))
+    print(the_return, len(transitions))
+    img: np.ndarray = env.render()
+    Image.fromarray(img).show()

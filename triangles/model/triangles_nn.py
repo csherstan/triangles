@@ -139,11 +139,14 @@ class Core(nn.Module):
         #
         # action_tokens = self.action_encoder(action)
 
-        triangles_buffer = jnp.zeros(shape=(batch_size, self.max_triangles, 10))
-        triangles_obs = observations["triangles"]
-        # TODO: I'm not sure how to properly handle this case yet. If I recall correctly, I think I need
-        # to avoid if statements so I'm not sure how to handle checking for len 0 triangles
-        triangles_buffer.at[:, 0:len(triangles_obs)].set(triangles_obs)
+        triangles_buffer = observations["triangles"]
+        num_triangles = observations["triangle_count"]
+
+        # triangles_buffer = jnp.zeros(shape=(batch_size, self.max_triangles, 10))
+        # triangles_obs = observations["triangles"]
+        # # TODO: I'm not sure how to properly handle this case yet. If I recall correctly, I think I need
+        # # to avoid if statements so I'm not sure how to handle checking for len 0 triangles
+        # triangles_buffer.at[:, 0:len(triangles_obs)].set(triangles_obs)
 
         triangle_tokens = Encoder(embed_size=self.embedding_size, embed_idx=1, embed=embed)(triangles_buffer)
 
@@ -151,8 +154,8 @@ class Core(nn.Module):
 
 
         mask = jnp.ones(shape=(batch_size, self.num_heads, self.query_size, self.query_size), dtype=jnp.bool)
-        mask.at[:, :, :, -len(triangles_obs)].set(False)
-        mask.at[:, :, -len(triangles_obs), :].set(False)
+        mask.at[:, :, :, -num_triangles].set(False)
+        mask.at[:, :, -num_triangles, :].set(False)
 
         outputs = nn.Sequential([
             nn.MultiHeadAttention(num_heads=self.num_heads, qkv_features=self.qkv_features),

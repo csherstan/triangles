@@ -267,7 +267,6 @@ def collect(
             return (
                 action * np.abs(action_space.high - action_space.low) / 2
                 + action_space.low
-                + 1
             )
 
         raise Exception
